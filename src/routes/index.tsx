@@ -70,8 +70,17 @@ function TradingDashboard() {
   const change = lastPrice - candles[Math.max(0, candles.length - 96)].close;
   const changePct = (change / lastPrice) * 100;
 
-  // Win/loss mock stats
-  const stats = useMemo(() => mockStats(symbol), [symbol]);
+  // Trade journal (persistent, powers learning + calendar)
+  useEffect(() => { seedIfEmpty(); }, []);
+  const trades = useSyncExternalStore(subscribeTrades, getTrades, () => []);
+  const stats = useMemo(() => performanceStats(trades), [trades]);
+  const symbolTrades = useMemo(() => trades.filter(t => t.symbol === symbol), [trades, symbol]);
+  const symbolStats = useMemo(() => performanceStats(symbolTrades), [symbolTrades]);
+
+  const handleLogTrade = (sig: Signal) => {
+    if (sig.side === "NONE") return;
+    logTradeFromSignal(sig, sizing.riskAmount || 100);
+  };
 
   return (
     <div className="min-h-screen bg-background text-foreground">

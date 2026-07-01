@@ -1,14 +1,20 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { TradingChart } from "@/components/trading/TradingChart";
 import { SignalCard } from "@/components/trading/SignalCard";
 import { Pill, Stat } from "@/components/trading/Stat";
+import { YearCalendar } from "@/components/trading/YearCalendar";
+import { LearningPanel } from "@/components/trading/LearningPanel";
+import { TradeLog } from "@/components/trading/TradeLog";
 import {
   SYMBOLS, TIMEFRAMES, generateCandles, tickCandle,
   type Symbol, type Timeframe, type Candle,
 } from "@/lib/trading/market-data";
-import { analyzeMarket, generateSignal, positionSize } from "@/lib/trading/signals";
-import { Activity, Bell, BellOff, Bot, ChevronDown, Radio, Shield, TrendingUp, Wifi } from "lucide-react";
+import { analyzeMarket, generateSignal, positionSize, type Signal } from "@/lib/trading/signals";
+import {
+  getTrades, logTradeFromSignal, seedIfEmpty, subscribeTrades, performanceStats,
+} from "@/lib/trading/journal";
+import { Activity, Bell, BellOff, Bot, CalendarDays, ChevronDown, Radio, Shield, TrendingUp, Wifi } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/")({

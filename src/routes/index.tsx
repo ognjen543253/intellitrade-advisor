@@ -367,16 +367,3 @@ function SectionHeader({ icon, title, sub }: { icon: React.ReactNode; title: str
   );
 }
 
-function mockStats(symbol: Symbol) {
-  const seed = symbol.length * 7;
-  const winRate = 54 + ((seed * 13) % 18);
-  const profitFactor = 1.4 + ((seed % 9) / 10);
-  return {
-    winRate,
-    profitFactor,
-    trades: 120 + ((seed * 11) % 80),
-    avgWin: (1.8 + (seed % 5) / 10).toFixed(2),
-    avgLoss: (0.9 + (seed % 4) / 10).toFixed(2),
-    bestSetup: "Trend pullback",
-  };
-}

@@ -175,26 +175,51 @@ function TradingDashboard() {
               </div>
             </section>
 
-            {/* Performance */}
+            {/* Performance for current instrument */}
             <section>
-              <SectionHeader icon={<TrendingUp className="h-4 w-4" />} title="AI Learning & Performance" sub="Tracked across recorded trades for this instrument" />
+              <SectionHeader icon={<TrendingUp className="h-4 w-4" />} title="Performance" sub={`Closed trades on ${meta.label}`} />
               <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
-                <Stat label="Win Rate" value={`${stats.winRate}%`} tone={stats.winRate > 55 ? "bull" : "default"} />
-                <Stat label="Profit Factor" value={stats.profitFactor.toFixed(2)} tone="bull" />
-                <Stat label="Trades" value={stats.trades} />
-                <Stat label="Avg Win" value={`+${stats.avgWin}R`} tone="bull" />
-                <Stat label="Avg Loss" value={`-${stats.avgLoss}R`} tone="bear" />
-                <Stat label="Best Setup" value={stats.bestSetup} />
+                <Stat label="Win Rate" value={`${symbolStats.winRate}%`} tone={symbolStats.winRate > 55 ? "bull" : "default"} />
+                <Stat label="Profit Factor" value={symbolStats.profitFactor.toFixed(2)} tone={symbolStats.profitFactor >= 1.5 ? "bull" : "default"} />
+                <Stat label="Trades" value={String(symbolStats.total)} />
+                <Stat label="Avg Win" value={`+$${symbolStats.avgWin}`} tone="bull" />
+                <Stat label="Avg Loss" value={`-$${symbolStats.avgLoss}`} tone="bear" />
+                <Stat label="Expectancy" value={`${symbolStats.expectancyR >= 0 ? "+" : ""}${symbolStats.expectancyR}R`} tone={symbolStats.expectancyR >= 0 ? "bull" : "bear"} />
               </div>
+            </section>
+
+            {/* Trading calendar */}
+            <section>
+              <SectionHeader icon={<CalendarDays className="h-4 w-4" />} title="Trading Calendar" sub="All logged trades — green = profitable day, red = losing day" />
+              <YearCalendar trades={trades} />
+            </section>
+
+            {/* Trade log */}
+            <section>
+              <TradeLog trades={trades} onChange={() => { /* store publishes */ }} />
             </section>
           </div>
 
-          {/* Right: signal + alerts */}
+          {/* Right column */}
           <aside className="flex flex-col gap-4">
             <div>
               <SectionHeader icon={<Bot className="h-4 w-4" />} title="AI Signal" sub={`${meta.label} · ${timeframe} · Quality over quantity`} />
-              <SignalCard signal={signal} digits={meta.digits} />
+              <SignalCard signal={signal} digits={meta.digits} onLogTrade={handleLogTrade} />
             </div>
+
+            <LearningPanel trades={trades} />
+
+            <div className="rounded-xl border border-border/60 bg-surface p-4">
+              <div className="text-[10px] uppercase tracking-wider text-muted-foreground">All-Time P&L</div>
+              <div className={cn("mt-1 font-mono-tab text-2xl font-bold",
+                stats.totalPnl >= 0 ? "text-bull" : "text-bear")}>
+                {stats.totalPnl >= 0 ? "+" : ""}${stats.totalPnl.toFixed(0)}
+              </div>
+              <div className="mt-1 text-[11px] text-muted-foreground">
+                {stats.wins}W · {stats.losses}L · {stats.total} closed · {stats.open} open
+              </div>
+            </div>
+
 
             <div className="rounded-xl border border-border/60 bg-surface p-4">
               <div className="flex items-center gap-2">

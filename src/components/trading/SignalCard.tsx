@@ -1,14 +1,15 @@
 import { Signal } from "@/lib/trading/signals";
 import { Pill } from "./Stat";
 import { cn } from "@/lib/utils";
-import { ArrowDown, ArrowUp, Check, X, Clock } from "lucide-react";
+import { ArrowDown, ArrowUp, Check, X, Clock, Plus } from "lucide-react";
 
 interface Props {
   signal: Signal;
   digits: number;
+  onLogTrade?: (signal: Signal) => void;
 }
 
-export function SignalCard({ signal, digits }: Props) {
+export function SignalCard({ signal, digits, onLogTrade }: Props) {
   if (signal.side === "NONE") {
     return (
       <div className="rounded-xl border border-border/60 bg-surface p-5">

@@ -78,7 +78,18 @@ export function SignalCard({ signal, digits, onLogTrade }: Props) {
         <Pill tone="muted">ATR {signal.atr.toFixed(digits)}</Pill>
         <Pill tone="muted">RSI {signal.rsi.toFixed(0)}</Pill>
         <Pill tone={isBuy ? "bull" : "bear"}>{signal.trend}</Pill>
+        {onLogTrade && (
+          <button
+            onClick={() => onLogTrade(signal)}
+            className={cn(
+              "ml-auto inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-[11px] font-semibold transition",
+              isBuy ? "bg-bull text-bull-foreground hover:opacity-90" : "bg-bear text-bear-foreground hover:opacity-90",
+            )}>
+            <Plus className="h-3 w-3" /> Log Trade
+          </button>
+        )}
       </div>
+
 
       <p className="mt-4 rounded-lg border border-border/50 bg-background/40 p-3 text-sm leading-relaxed text-foreground/90">
         {signal.explanation}

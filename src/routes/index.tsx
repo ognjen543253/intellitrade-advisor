@@ -73,13 +73,26 @@ function TradingDashboard() {
 
   // Trade journal (persistent, powers learning + calendar)
   useEffect(() => { seedIfEmpty(); }, []);
-  const trades = useSyncExternalStore(subscribeTrades, getTrades, () => []);
+  const trades = useSyncExternalStore(subscribeTrades, getTrades, getTrades);
   const stats = useMemo(() => performanceStats(trades), [trades]);
   const symbolTrades = useMemo(() => trades.filter(t => t.symbol === symbol), [trades, symbol]);
   const symbolStats = useMemo(() => performanceStats(symbolTrades), [symbolTrades]);
 
+  // Active open trade for this symbol+timeframe (freezes entry & TP, trails SL to break-even)
+  const activeTrade: Trade | undefined = useMemo(
+    () => trades.find(t => t.status === "open" && t.symbol === symbol && t.timeframe === timeframe),
+    [trades, symbol, timeframe],
+  );
+
+  // Trail SL to entry once price is >= 1R in favor (never past entry, TP never moves)
+  useEffect(() => {
+    if (!activeTrade) return;
+    manageOpenTrades(symbol, lastPrice);
+  }, [lastPrice, symbol, activeTrade]);
+
   const handleLogTrade = (sig: Signal) => {
     if (sig.side === "NONE") return;
+    if (activeTrade) return; // one open trade per symbol/timeframe — entry can't move
     logTradeFromSignal(sig, sizing.riskAmount || 100);
   };
 

@@ -42,26 +42,11 @@ export function subscribeTrades(fn: () => void) {
 }
 export function getTrades(): Trade[] { return read(); }
 
-/** Freeze entry & TP; only allow SL to trail to break-even once >= 1R in favor. */
-export function manageOpenTrades(symbol: Symbol, price: number): boolean {
-  const trades = read();
-  let mutated = false;
-  const next = trades.map(t => {
-    if (t.status !== "open" || t.symbol !== symbol) return t;
-    const risk = Math.abs(t.entry - t.stopLoss);
-    if (risk <= 0) return t;
-    if (t.side === "BUY") {
-      const rInProfit = (price - t.entry) / risk;
-      if (rInProfit >= 1 && t.stopLoss < t.entry) { mutated = true; return { ...t, stopLoss: t.entry }; }
-    } else {
-      const rInProfit = (t.entry - price) / risk;
-      if (rInProfit >= 1 && t.stopLoss > t.entry) { mutated = true; return { ...t, stopLoss: t.entry }; }
-    }
-    return t;
-  });
-  if (mutated) write(next);
-  return mutated;
+/** Trades are fully frozen once opened: entry, stop-loss and take-profits never move. */
+export function manageOpenTrades(_symbol: Symbol, _price: number): boolean {
+  return false;
 }
+
 
 export function logTradeFromSignal(sig: Signal, riskAmount = 100): Trade {
   const trades = read();

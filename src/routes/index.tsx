@@ -388,3 +388,53 @@ function SectionHeader({ icon, title, sub }: { icon: React.ReactNode; title: str
   );
 }
 
+function ActivePositionCard({ trade, price, digits }: { trade: Trade; price: number; digits: number }) {
+  const isBuy = trade.side === "BUY";
+  const risk = Math.abs(trade.entry - trade.stopLoss);
+  const rNow = risk > 0
+    ? (isBuy ? (price - trade.entry) / risk : (trade.entry - price) / risk)
+    : 0;
+  const atBreakeven = trade.stopLoss === trade.entry;
+  const fmt = (n: number) => n.toFixed(digits);
+  return (
+    <div className={cn(
+      "rounded-xl border bg-surface p-4",
+      isBuy ? "border-bull/40" : "border-bear/40",
+    )}>
+      <div className="flex items-center gap-2">
+        <span className={cn(
+          "rounded-md px-2 py-0.5 text-[11px] font-bold",
+          isBuy ? "bg-bull text-bull-foreground" : "bg-bear text-bear-foreground",
+        )}>{trade.side} · OPEN</span>
+        <span className="font-mono-tab text-xs font-semibold">{trade.symbol}</span>
+        <Pill tone="muted">{trade.timeframe}</Pill>
+        {atBreakeven && <Pill tone="info">SL @ Break-even</Pill>}
+        <span className={cn("ml-auto font-mono-tab text-sm font-bold", rNow >= 0 ? "text-bull" : "text-bear")}>
+          {rNow >= 0 ? "+" : ""}{rNow.toFixed(2)}R
+        </span>
+      </div>
+      <div className="mt-3 grid grid-cols-4 gap-2">
+        <MiniLevel label="Entry 🔒" value={fmt(trade.entry)} />
+        <MiniLevel label={atBreakeven ? "SL → BE" : "Stop Loss"} value={fmt(trade.stopLoss)} tone="bear" />
+        <MiniLevel label="TP 1 🔒" value={fmt(trade.takeProfit1)} tone="bull" />
+        <MiniLevel label="TP 2 🔒" value={fmt(trade.takeProfit2)} tone="bull" />
+      </div>
+      <p className="mt-3 text-[11px] leading-relaxed text-muted-foreground">
+        Entry & take-profits are locked after execution. Stop-loss can only advance to your entry (break-even) once the trade is 1R in profit — never past it, and never against you.
+      </p>
+    </div>
+  );
+}
+
+function MiniLevel({ label, value, tone = "default" }: { label: string; value: string; tone?: "default" | "bull" | "bear" }) {
+  return (
+    <div className="rounded-lg border border-border/50 bg-background/40 px-2 py-1.5">
+      <div className="text-[9px] uppercase tracking-wider text-muted-foreground">{label}</div>
+      <div className={cn("font-mono-tab text-xs font-semibold",
+        tone === "bull" ? "text-bull" : tone === "bear" ? "text-bear" : "text-foreground")}>
+        {value}
+      </div>
+    </div>
+  );
+}
+

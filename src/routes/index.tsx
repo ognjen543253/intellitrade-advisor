@@ -134,10 +134,10 @@ function TradingDashboard() {
                 digits={meta.digits}
                 support={analysis.support}
                 resistance={analysis.resistance}
-                entry={signal.side !== "NONE" ? signal.entry : undefined}
-                stopLoss={signal.side !== "NONE" ? signal.stopLoss : undefined}
-                takeProfit1={signal.side !== "NONE" ? signal.takeProfit1 : undefined}
-                takeProfit2={signal.side !== "NONE" ? signal.takeProfit2 : undefined}
+                entry={activeTrade ? activeTrade.entry : (signal.side !== "NONE" ? signal.entry : undefined)}
+                stopLoss={activeTrade ? activeTrade.stopLoss : (signal.side !== "NONE" ? signal.stopLoss : undefined)}
+                takeProfit1={activeTrade ? activeTrade.takeProfit1 : (signal.side !== "NONE" ? signal.takeProfit1 : undefined)}
+                takeProfit2={activeTrade ? activeTrade.takeProfit2 : (signal.side !== "NONE" ? signal.takeProfit2 : undefined)}
               />
             </div>
 

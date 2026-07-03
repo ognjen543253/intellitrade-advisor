@@ -23,21 +23,45 @@ export interface Trade {
 
 const KEY = "sentinel:trades:v1";
 const listeners = new Set<() => void>();
+let cache: Trade[] | null = null;
 
 function read(): Trade[] {
-  if (typeof window === "undefined") return [];
-  try { return JSON.parse(localStorage.getItem(KEY) || "[]"); } catch { return []; }
+  if (cache) return cache;
+  if (typeof window === "undefined") { cache = []; return cache; }
+  try { cache = JSON.parse(localStorage.getItem(KEY) || "[]"); } catch { cache = []; }
+  return cache!;
 }
 function write(t: Trade[]) {
-  if (typeof window === "undefined") return;
-  localStorage.setItem(KEY, JSON.stringify(t));
+  cache = t;
+  if (typeof window !== "undefined") localStorage.setItem(KEY, JSON.stringify(t));
   listeners.forEach(l => l());
 }
 export function subscribeTrades(fn: () => void) {
   listeners.add(fn);
-  return () => listeners.delete(fn);
+  return () => { listeners.delete(fn); };
 }
 export function getTrades(): Trade[] { return read(); }
+
+/** Freeze entry & TP; only allow SL to trail to break-even once >= 1R in favor. */
+export function manageOpenTrades(symbol: Symbol, price: number): boolean {
+  const trades = read();
+  let mutated = false;
+  const next = trades.map(t => {
+    if (t.status !== "open" || t.symbol !== symbol) return t;
+    const risk = Math.abs(t.entry - t.stopLoss);
+    if (risk <= 0) return t;
+    if (t.side === "BUY") {
+      const rInProfit = (price - t.entry) / risk;
+      if (rInProfit >= 1 && t.stopLoss < t.entry) { mutated = true; return { ...t, stopLoss: t.entry }; }
+    } else {
+      const rInProfit = (t.entry - price) / risk;
+      if (rInProfit >= 1 && t.stopLoss > t.entry) { mutated = true; return { ...t, stopLoss: t.entry }; }
+    }
+    return t;
+  });
+  if (mutated) write(next);
+  return mutated;
+}
 
 export function logTradeFromSignal(sig: Signal, riskAmount = 100): Trade {
   const trades = read();

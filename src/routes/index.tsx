@@ -13,6 +13,7 @@ import {
 import { analyzeMarket, generateSignal, positionSize, type Signal } from "@/lib/trading/signals";
 import {
   getTrades, logTradeFromSignal, seedIfEmpty, subscribeTrades, performanceStats,
+  manageOpenTrades, type Trade,
 } from "@/lib/trading/journal";
 import { Activity, Bell, BellOff, Bot, CalendarDays, ChevronDown, Radio, Shield, TrendingUp, Wifi } from "lucide-react";
 import { cn } from "@/lib/utils";

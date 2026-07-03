@@ -216,9 +216,16 @@ function TradingDashboard() {
 
           {/* Right column */}
           <aside className="flex flex-col gap-4">
+            {activeTrade && (
+              <ActivePositionCard trade={activeTrade} price={lastPrice} digits={meta.digits} />
+            )}
             <div>
               <SectionHeader icon={<Bot className="h-4 w-4" />} title="AI Signal" sub={`${meta.label} · ${timeframe} · Quality over quantity`} />
-              <SignalCard signal={signal} digits={meta.digits} onLogTrade={handleLogTrade} />
+              <SignalCard
+                signal={signal}
+                digits={meta.digits}
+                onLogTrade={activeTrade ? undefined : handleLogTrade}
+              />
             </div>
 
             <LearningPanel trades={trades} />

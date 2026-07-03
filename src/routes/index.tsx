@@ -13,6 +13,7 @@ import {
 import { analyzeMarket, generateSignal, positionSize, type Signal } from "@/lib/trading/signals";
 import {
   getTrades, logTradeFromSignal, seedIfEmpty, subscribeTrades, performanceStats,
+  manageOpenTrades, type Trade,
 } from "@/lib/trading/journal";
 import { Activity, Bell, BellOff, Bot, CalendarDays, ChevronDown, Radio, Shield, TrendingUp, Wifi } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -72,13 +73,26 @@ function TradingDashboard() {
 
   // Trade journal (persistent, powers learning + calendar)
   useEffect(() => { seedIfEmpty(); }, []);
-  const trades = useSyncExternalStore(subscribeTrades, getTrades, () => []);
+  const trades = useSyncExternalStore(subscribeTrades, getTrades, getTrades);
   const stats = useMemo(() => performanceStats(trades), [trades]);
   const symbolTrades = useMemo(() => trades.filter(t => t.symbol === symbol), [trades, symbol]);
   const symbolStats = useMemo(() => performanceStats(symbolTrades), [symbolTrades]);
 
+  // Active open trade for this symbol+timeframe (freezes entry & TP, trails SL to break-even)
+  const activeTrade: Trade | undefined = useMemo(
+    () => trades.find(t => t.status === "open" && t.symbol === symbol && t.timeframe === timeframe),
+    [trades, symbol, timeframe],
+  );
+
+  // Trail SL to entry once price is >= 1R in favor (never past entry, TP never moves)
+  useEffect(() => {
+    if (!activeTrade) return;
+    manageOpenTrades(symbol, lastPrice);
+  }, [lastPrice, symbol, activeTrade]);
+
   const handleLogTrade = (sig: Signal) => {
     if (sig.side === "NONE") return;
+    if (activeTrade) return; // one open trade per symbol/timeframe — entry can't move
     logTradeFromSignal(sig, sizing.riskAmount || 100);
   };
 
@@ -120,10 +134,10 @@ function TradingDashboard() {
                 digits={meta.digits}
                 support={analysis.support}
                 resistance={analysis.resistance}
-                entry={signal.side !== "NONE" ? signal.entry : undefined}
-                stopLoss={signal.side !== "NONE" ? signal.stopLoss : undefined}
-                takeProfit1={signal.side !== "NONE" ? signal.takeProfit1 : undefined}
-                takeProfit2={signal.side !== "NONE" ? signal.takeProfit2 : undefined}
+                entry={activeTrade ? activeTrade.entry : (signal.side !== "NONE" ? signal.entry : undefined)}
+                stopLoss={activeTrade ? activeTrade.stopLoss : (signal.side !== "NONE" ? signal.stopLoss : undefined)}
+                takeProfit1={activeTrade ? activeTrade.takeProfit1 : (signal.side !== "NONE" ? signal.takeProfit1 : undefined)}
+                takeProfit2={activeTrade ? activeTrade.takeProfit2 : (signal.side !== "NONE" ? signal.takeProfit2 : undefined)}
               />
             </div>
 
@@ -202,9 +216,16 @@ function TradingDashboard() {
 
           {/* Right column */}
           <aside className="flex flex-col gap-4">
+            {activeTrade && (
+              <ActivePositionCard trade={activeTrade} price={lastPrice} digits={meta.digits} />
+            )}
             <div>
               <SectionHeader icon={<Bot className="h-4 w-4" />} title="AI Signal" sub={`${meta.label} · ${timeframe} · Quality over quantity`} />
-              <SignalCard signal={signal} digits={meta.digits} onLogTrade={handleLogTrade} />
+              <SignalCard
+                signal={signal}
+                digits={meta.digits}
+                onLogTrade={activeTrade ? undefined : handleLogTrade}
+              />
             </div>
 
             <LearningPanel trades={trades} />
@@ -363,6 +384,56 @@ function SectionHeader({ icon, title, sub }: { icon: React.ReactNode; title: str
       <span className="text-primary">{icon}</span>
       <h2 className="text-sm font-semibold tracking-tight">{title}</h2>
       {sub && <span className="text-[11px] text-muted-foreground">· {sub}</span>}
+    </div>
+  );
+}
+
+function ActivePositionCard({ trade, price, digits }: { trade: Trade; price: number; digits: number }) {
+  const isBuy = trade.side === "BUY";
+  const risk = Math.abs(trade.entry - trade.stopLoss);
+  const rNow = risk > 0
+    ? (isBuy ? (price - trade.entry) / risk : (trade.entry - price) / risk)
+    : 0;
+  const atBreakeven = trade.stopLoss === trade.entry;
+  const fmt = (n: number) => n.toFixed(digits);
+  return (
+    <div className={cn(
+      "rounded-xl border bg-surface p-4",
+      isBuy ? "border-bull/40" : "border-bear/40",
+    )}>
+      <div className="flex items-center gap-2">
+        <span className={cn(
+          "rounded-md px-2 py-0.5 text-[11px] font-bold",
+          isBuy ? "bg-bull text-bull-foreground" : "bg-bear text-bear-foreground",
+        )}>{trade.side} · OPEN</span>
+        <span className="font-mono-tab text-xs font-semibold">{trade.symbol}</span>
+        <Pill tone="muted">{trade.timeframe}</Pill>
+        {atBreakeven && <Pill tone="info">SL @ Break-even</Pill>}
+        <span className={cn("ml-auto font-mono-tab text-sm font-bold", rNow >= 0 ? "text-bull" : "text-bear")}>
+          {rNow >= 0 ? "+" : ""}{rNow.toFixed(2)}R
+        </span>
+      </div>
+      <div className="mt-3 grid grid-cols-4 gap-2">
+        <MiniLevel label="Entry 🔒" value={fmt(trade.entry)} />
+        <MiniLevel label={atBreakeven ? "SL → BE" : "Stop Loss"} value={fmt(trade.stopLoss)} tone="bear" />
+        <MiniLevel label="TP 1 🔒" value={fmt(trade.takeProfit1)} tone="bull" />
+        <MiniLevel label="TP 2 🔒" value={fmt(trade.takeProfit2)} tone="bull" />
+      </div>
+      <p className="mt-3 text-[11px] leading-relaxed text-muted-foreground">
+        Entry & take-profits are locked after execution. Stop-loss can only advance to your entry (break-even) once the trade is 1R in profit — never past it, and never against you.
+      </p>
+    </div>
+  );
+}
+
+function MiniLevel({ label, value, tone = "default" }: { label: string; value: string; tone?: "default" | "bull" | "bear" }) {
+  return (
+    <div className="rounded-lg border border-border/50 bg-background/40 px-2 py-1.5">
+      <div className="text-[9px] uppercase tracking-wider text-muted-foreground">{label}</div>
+      <div className={cn("font-mono-tab text-xs font-semibold",
+        tone === "bull" ? "text-bull" : tone === "bear" ? "text-bear" : "text-foreground")}>
+        {value}
+      </div>
     </div>
   );
 }

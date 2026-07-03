@@ -1,6 +1,8 @@
 import type { Signal } from "./signals";
 import type { Symbol, Timeframe } from "./market-data";
 
+
+
 export type TradeStatus = "open" | "win" | "loss" | "breakeven";
 
 export interface Trade {
@@ -42,26 +44,11 @@ export function subscribeTrades(fn: () => void) {
 }
 export function getTrades(): Trade[] { return read(); }
 
-/** Freeze entry & TP; only allow SL to trail to break-even once >= 1R in favor. */
-export function manageOpenTrades(symbol: Symbol, price: number): boolean {
-  const trades = read();
-  let mutated = false;
-  const next = trades.map(t => {
-    if (t.status !== "open" || t.symbol !== symbol) return t;
-    const risk = Math.abs(t.entry - t.stopLoss);
-    if (risk <= 0) return t;
-    if (t.side === "BUY") {
-      const rInProfit = (price - t.entry) / risk;
-      if (rInProfit >= 1 && t.stopLoss < t.entry) { mutated = true; return { ...t, stopLoss: t.entry }; }
-    } else {
-      const rInProfit = (t.entry - price) / risk;
-      if (rInProfit >= 1 && t.stopLoss > t.entry) { mutated = true; return { ...t, stopLoss: t.entry }; }
-    }
-    return t;
-  });
-  if (mutated) write(next);
-  return mutated;
+/** Trades are fully frozen once opened: entry, stop-loss and take-profits never move. */
+export function manageOpenTrades(_symbol: Symbol, _price: number): boolean {
+  return false;
 }
+
 
 export function logTradeFromSignal(sig: Signal, riskAmount = 100): Trade {
   const trades = read();
@@ -89,15 +76,26 @@ export function logTradeFromSignal(sig: Signal, riskAmount = 100): Trade {
   return t;
 }
 
-export function resolveTrade(id: string, outcome: "win" | "loss" | "breakeven") {
+export function resolveTrade(
+  id: string,
+  outcome: "win" | "loss" | "breakeven",
+  pnlAmount?: number,
+) {
   const trades = read();
   const t = trades.find(x => x.id === id);
   if (!t || t.status !== "open") return;
   const risk = (t as Trade & { riskAmount?: number }).riskAmount ?? 100;
   t.status = outcome;
   t.closedAt = Date.now();
-  t.rMultiple = outcome === "win" ? 2 : outcome === "loss" ? -1 : 0;
-  t.pnl = risk * t.rMultiple;
+  if (pnlAmount != null && !Number.isNaN(pnlAmount)) {
+    // User-supplied $ result — sign follows outcome, breakeven forced to 0.
+    const magnitude = Math.abs(pnlAmount);
+    t.pnl = outcome === "win" ? magnitude : outcome === "loss" ? -magnitude : 0;
+    t.rMultiple = risk > 0 ? +(t.pnl / risk).toFixed(2) : 0;
+  } else {
+    t.rMultiple = outcome === "win" ? 2 : outcome === "loss" ? -1 : 0;
+    t.pnl = risk * t.rMultiple;
+  }
   write(trades);
 }
 
@@ -107,42 +105,13 @@ export function deleteTrade(id: string) {
 
 export function clearAllTrades() { write([]); }
 
-/** Seed a year of realistic trades if journal is empty — makes calendar meaningful on first load. */
+/** Kept for compatibility — the calendar now starts empty until the user logs real trades. */
 export function seedIfEmpty() {
-  const cur = read();
-  if (cur.length > 0) return;
-  const now = new Date();
-  const symbols: Symbol[] = ["EURUSD", "GBPUSD", "USDJPY", "NAS100", "SPX500", "AUDUSD"];
-  const trades: Trade[] = [];
-  // Distribute ~140 trades over the last ~11 months
-  for (let i = 0; i < 140; i++) {
-    const daysAgo = Math.floor(Math.random() * 330) + 3;
-    const d = new Date(now);
-    d.setDate(d.getDate() - daysAgo);
-    d.setHours(8 + Math.floor(Math.random() * 10), Math.floor(Math.random() * 60), 0, 0);
-    // Skip weekends for realism
-    if (d.getDay() === 0 || d.getDay() === 6) continue;
-    const win = Math.random() < 0.58;
-    const be = !win && Math.random() < 0.1;
-    const sym = symbols[Math.floor(Math.random() * symbols.length)];
-    const rMult = be ? 0 : win ? 2 : -1;
-    trades.push({
-      id: `seed-${i}-${d.getTime()}`,
-      symbol: sym,
-      timeframe: (["15m", "1h", "4h"] as Timeframe[])[Math.floor(Math.random() * 3)],
-      side: Math.random() < 0.55 ? "BUY" : "SELL",
-      entry: 0, stopLoss: 0, takeProfit1: 0, takeProfit2: 0,
-      confidence: 65 + Math.floor(Math.random() * 30),
-      reasons: [],
-      openedAt: d.getTime(),
-      closedAt: d.getTime() + 3600 * 1000,
-      status: be ? "breakeven" : win ? "win" : "loss",
-      rMultiple: rMult,
-      pnl: rMult * 100,
-    });
-  }
-  write(trades);
+  const trades = read();
+  const filtered = trades.filter(t => !t.id.startsWith("seed-"));
+  if (filtered.length !== trades.length) write(filtered);
 }
+
 
 // -------- Aggregations --------
 

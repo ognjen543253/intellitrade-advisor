@@ -13,8 +13,9 @@ import {
 import { analyzeMarket, generateSignal, positionSize, type Signal } from "@/lib/trading/signals";
 import {
   getTrades, logTradeFromSignal, seedIfEmpty, subscribeTrades, performanceStats,
-  manageOpenTrades, type Trade,
+  type Trade,
 } from "@/lib/trading/journal";
+
 import { Activity, Bell, BellOff, Bot, CalendarDays, ChevronDown, Radio, Shield, TrendingUp, Wifi } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -84,11 +85,8 @@ function TradingDashboard() {
     [trades, symbol, timeframe],
   );
 
-  // Trail SL to entry once price is >= 1R in favor (never past entry, TP never moves)
-  useEffect(() => {
-    if (!activeTrade) return;
-    manageOpenTrades(symbol, lastPrice);
-  }, [lastPrice, symbol, activeTrade]);
+  // Trades are fully frozen once opened — entry, SL and TP never move.
+
 
   const handleLogTrade = (sig: Signal) => {
     if (sig.side === "NONE") return;

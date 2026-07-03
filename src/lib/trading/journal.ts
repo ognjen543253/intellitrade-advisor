@@ -1,5 +1,8 @@
 import type { Signal } from "./signals";
 import type { Symbol, Timeframe } from "./market-data";
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+type _KeepTimeframe = Timeframe;
+
 
 export type TradeStatus = "open" | "win" | "loss" | "breakeven";
 

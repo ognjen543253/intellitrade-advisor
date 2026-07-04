@@ -153,7 +153,8 @@ function TradingDashboard() {
           <div className="basis-full" />
           <TimeframePicker value={timeframe} onChange={setTimeframe} />
           <div className="ml-auto flex items-center gap-2 text-[11px] text-muted-foreground">
-            <Wifi className="h-3 w-3 text-bull" /> Live simulated feed · {analysis.sessionTag} session
+            <Wifi className={cn("h-3 w-3", feedStatus === "live" ? "text-bull" : feedStatus === "error" ? "text-bear" : "text-muted-foreground")} />
+            {feedStatus === "error" ? `Feed error: ${feedError}` : `Live Yahoo Finance feed · ${analysis.sessionTag} session`}
           </div>
         </div>
 

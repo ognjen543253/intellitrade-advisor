@@ -41,25 +41,43 @@ function TradingDashboard() {
   const [alertsOn, setAlertsOn] = useState(true);
 
   const meta = SYMBOLS.find(s => s.id === symbol)!;
-  const [candles, setCandles] = useState<Candle[]>(() => generateCandles(symbol, timeframe));
+  const [candles, setCandles] = useState<Candle[]>([]);
+  const [feedStatus, setFeedStatus] = useState<"loading" | "live" | "error">("loading");
+  const [feedError, setFeedError] = useState<string | null>(null);
+  const fetchCandles = useServerFn(fetchLiveCandles);
+  const reqIdRef = useRef(0);
 
-  // Regenerate on symbol / timeframe change
+  // Fetch real market data from Yahoo Finance via server function, poll every 5s.
   useEffect(() => {
-    setCandles(generateCandles(symbol, timeframe));
-  }, [symbol, timeframe]);
+    let cancelled = false;
+    const myReq = ++reqIdRef.current;
+    setFeedStatus("loading");
+    setFeedError(null);
 
-  // Live tick simulation
-  useEffect(() => {
-    const id = setInterval(() => {
-      setCandles(prev => {
-        if (prev.length === 0) return prev;
-        const last = prev[prev.length - 1];
-        const updated = tickCandle(last, symbol);
-        return [...prev.slice(0, -1), updated];
-      });
-    }, 1500);
-    return () => clearInterval(id);
-  }, [symbol]);
+    const load = async () => {
+      try {
+        const res = await fetchCandles({ data: { symbol, timeframe } });
+        if (cancelled || myReq !== reqIdRef.current) return;
+        if (res.error || res.candles.length === 0) {
+          setFeedStatus("error");
+          setFeedError(res.error ?? "No candles returned");
+          return;
+        }
+        setCandles(res.candles as Candle[]);
+        setFeedStatus("live");
+        setFeedError(null);
+      } catch (e: any) {
+        if (cancelled) return;
+        setFeedStatus("error");
+        setFeedError(e?.message ?? "Feed error");
+      }
+    };
+
+    load();
+    const id = setInterval(load, 5000);
+    return () => { cancelled = true; clearInterval(id); };
+  }, [symbol, timeframe, fetchCandles]);
+
 
   const analysis = useMemo(() => analyzeMarket(candles, symbol), [candles, symbol]);
   const signal = useMemo(() => generateSignal(candles, symbol, timeframe), [candles, symbol, timeframe]);

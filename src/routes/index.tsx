@@ -296,7 +296,15 @@ function TradingDashboard() {
               />
             </div>
 
+            <BestSetupCard
+              scan={scan}
+              activeTf={timeframe}
+              digits={meta.digits}
+              onJump={setTimeframe}
+            />
+
             <LearningPanel trades={trades} />
+
 
             <div className="rounded-xl border border-border/60 bg-surface p-4">
               <div className="text-[10px] uppercase tracking-wider text-muted-foreground">All-Time P&L</div>

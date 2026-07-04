@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useServerFn } from "@tanstack/react-start";
 import { TradingChart } from "@/components/trading/TradingChart";
 import { SignalCard } from "@/components/trading/SignalCard";
 import { Pill, Stat } from "@/components/trading/Stat";
@@ -7,10 +8,11 @@ import { YearCalendar } from "@/components/trading/YearCalendar";
 import { LearningPanel } from "@/components/trading/LearningPanel";
 import { TradeLog } from "@/components/trading/TradeLog";
 import {
-  SYMBOLS, TIMEFRAMES, generateCandles, tickCandle,
+  SYMBOLS, TIMEFRAMES,
   type Symbol, type Timeframe, type Candle,
 } from "@/lib/trading/market-data";
 import { analyzeMarket, generateSignal, positionSize, type Signal } from "@/lib/trading/signals";
+import { fetchLiveCandles } from "@/lib/trading/live-feed.functions";
 import {
   getTrades, logTradeFromSignal, seedIfEmpty, subscribeTrades, performanceStats,
   type Trade,
@@ -39,38 +41,43 @@ function TradingDashboard() {
   const [alertsOn, setAlertsOn] = useState(true);
 
   const meta = SYMBOLS.find(s => s.id === symbol)!;
-  const [candles, setCandles] = useState<Candle[]>(() => generateCandles(symbol, timeframe));
+  const [candles, setCandles] = useState<Candle[]>([]);
+  const [feedStatus, setFeedStatus] = useState<"loading" | "live" | "error">("loading");
+  const [feedError, setFeedError] = useState<string | null>(null);
+  const fetchCandles = useServerFn(fetchLiveCandles);
+  const reqIdRef = useRef(0);
 
-  // Regenerate on symbol / timeframe change
+  // Fetch real market data from Yahoo Finance via server function, poll every 5s.
   useEffect(() => {
-    setCandles(generateCandles(symbol, timeframe));
-  }, [symbol, timeframe]);
+    let cancelled = false;
+    const myReq = ++reqIdRef.current;
+    setFeedStatus("loading");
+    setFeedError(null);
 
-  // Live tick simulation
-  useEffect(() => {
-    const id = setInterval(() => {
-      setCandles(prev => {
-        if (prev.length === 0) return prev;
-        const last = prev[prev.length - 1];
-        const updated = tickCandle(last, symbol);
-        return [...prev.slice(0, -1), updated];
-      });
-    }, 1500);
-    return () => clearInterval(id);
-  }, [symbol]);
+    const load = async () => {
+      try {
+        const res = await fetchCandles({ data: { symbol, timeframe } });
+        if (cancelled || myReq !== reqIdRef.current) return;
+        if (res.error || res.candles.length === 0) {
+          setFeedStatus("error");
+          setFeedError(res.error ?? "No candles returned");
+          return;
+        }
+        setCandles(res.candles as Candle[]);
+        setFeedStatus("live");
+        setFeedError(null);
+      } catch (e: any) {
+        if (cancelled) return;
+        setFeedStatus("error");
+        setFeedError(e?.message ?? "Feed error");
+      }
+    };
 
-  const analysis = useMemo(() => analyzeMarket(candles, symbol), [candles, symbol]);
-  const signal = useMemo(() => generateSignal(candles, symbol, timeframe), [candles, symbol, timeframe]);
-  const sizing = useMemo(
-    () => positionSize(accountBalance, riskPct, signal.entry, signal.stopLoss, meta.group === "Forex" ? 10 : 1),
-    [accountBalance, riskPct, signal, meta.group],
-  );
+    load();
+    const id = setInterval(load, 5000);
+    return () => { cancelled = true; clearInterval(id); };
+  }, [symbol, timeframe, fetchCandles]);
 
-  const lastPrice = candles[candles.length - 1]?.close ?? 0;
-  const prevPrice = candles[candles.length - 2]?.close ?? lastPrice;
-  const priceUp = lastPrice >= prevPrice;
-  const change = lastPrice - candles[Math.max(0, candles.length - 96)].close;
-  const changePct = (change / lastPrice) * 100;
 
   // Trade journal (persistent, powers learning + calendar)
   useEffect(() => { seedIfEmpty(); }, []);
@@ -79,20 +86,48 @@ function TradingDashboard() {
   const symbolTrades = useMemo(() => trades.filter(t => t.symbol === symbol), [trades, symbol]);
   const symbolStats = useMemo(() => performanceStats(symbolTrades), [symbolTrades]);
 
-  // Active open trade for this symbol+timeframe (freezes entry & TP, trails SL to break-even)
   const activeTrade: Trade | undefined = useMemo(
     () => trades.find(t => t.status === "open" && t.symbol === symbol && t.timeframe === timeframe),
     [trades, symbol, timeframe],
   );
 
-  // Trades are fully frozen once opened — entry, SL and TP never move.
+  const ready = candles.length >= 30;
 
+  if (!ready) {
+    return (
+      <div className="min-h-screen bg-background text-foreground">
+        <Header alertsOn={alertsOn} onToggleAlerts={() => setAlertsOn(v => !v)} />
+        <div className="mx-auto max-w-[1600px] px-4 py-16 text-center lg:px-6">
+          <div className="inline-flex items-center gap-2 rounded-full border border-border/60 bg-surface px-4 py-2">
+            <span className={cn("h-2 w-2 rounded-full ticker-pulse", feedStatus === "error" ? "bg-bear" : "bg-info")} />
+            <span className="text-sm">
+              {feedStatus === "error"
+                ? `Live feed error: ${feedError}`
+                : `Loading real ${meta.label} ${timeframe} candles from Yahoo Finance…`}
+            </span>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const analysis = analyzeMarket(candles, symbol);
+  const signal = generateSignal(candles, symbol, timeframe);
+  const sizing = positionSize(accountBalance, riskPct, signal.entry, signal.stopLoss, meta.group === "Forex" ? 10 : 1);
+
+  const lastPrice = candles[candles.length - 1].close;
+  const prevPrice = candles[candles.length - 2]?.close ?? lastPrice;
+  const priceUp = lastPrice >= prevPrice;
+  const baseIdx = Math.max(0, candles.length - 96);
+  const change = lastPrice - candles[baseIdx].close;
+  const changePct = lastPrice ? (change / lastPrice) * 100 : 0;
 
   const handleLogTrade = (sig: Signal) => {
     if (sig.side === "NONE") return;
     if (activeTrade) return; // one open trade per symbol/timeframe — entry can't move
     logTradeFromSignal(sig, sizing.riskAmount || 100);
   };
+
 
   return (
     <div className="min-h-screen bg-background text-foreground">
@@ -118,7 +153,8 @@ function TradingDashboard() {
           <div className="basis-full" />
           <TimeframePicker value={timeframe} onChange={setTimeframe} />
           <div className="ml-auto flex items-center gap-2 text-[11px] text-muted-foreground">
-            <Wifi className="h-3 w-3 text-bull" /> Live simulated feed · {analysis.sessionTag} session
+            <Wifi className={cn("h-3 w-3", feedStatus === "live" ? "text-bull" : feedStatus === "error" ? "text-bear" : "text-muted-foreground")} />
+            {feedStatus === "error" ? `Feed error: ${feedError}` : `Live Yahoo Finance feed · ${analysis.sessionTag} session`}
           </div>
         </div>
 
@@ -279,7 +315,7 @@ function TradingDashboard() {
         </div>
 
         <footer className="mt-8 border-t border-border/60 pt-4 pb-8 text-[11px] text-muted-foreground">
-          Sentinel AI runs on a high-fidelity simulated feed for demonstration. Plug in a live data provider to trade real markets.
+          Sentinel AI uses real market data from Yahoo Finance (delayed up to ~15 min for indices, real-time for FX). Prices refresh every 5 seconds.
         </footer>
       </div>
     </div>

@@ -104,12 +104,8 @@ function TradingDashboard() {
     return () => { cancelled = true; clearInterval(id); };
   }, [symbol, timeframe, fetchCandles]);
 
-  // Best setup across all timeframes: highest confidence among BUY/SELL.
-  const bestScan = useMemo(() => {
-    const actionable = scan.filter(s => s.signal && s.signal.side !== "NONE");
-    if (actionable.length === 0) return null;
-    return actionable.reduce((a, b) => (b.signal!.confidence > a.signal!.confidence ? b : a));
-  }, [scan]);
+
+
 
 
 

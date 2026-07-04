@@ -47,7 +47,12 @@ function TradingDashboard() {
   const fetchCandles = useServerFn(fetchLiveCandles);
   const reqIdRef = useRef(0);
 
+  // Multi-timeframe scan: signals across every TF for the current symbol.
+  type TfScan = { timeframe: Timeframe; signal: Signal | null; error?: string };
+  const [scan, setScan] = useState<TfScan[]>([]);
+
   // Fetch real market data from Yahoo Finance via server function, poll every 5s.
+  // Also scan every timeframe in parallel to surface the best setup.
   useEffect(() => {
     let cancelled = false;
     const myReq = ++reqIdRef.current;
@@ -55,28 +60,57 @@ function TradingDashboard() {
     setFeedError(null);
 
     const load = async () => {
-      try {
-        const res = await fetchCandles({ data: { symbol, timeframe } });
-        if (cancelled || myReq !== reqIdRef.current) return;
-        if (res.error || res.candles.length === 0) {
-          setFeedStatus("error");
-          setFeedError(res.error ?? "No candles returned");
-          return;
-        }
-        setCandles(res.candles as Candle[]);
+      // Fetch all timeframes in parallel; the active one drives the chart.
+      const results = await Promise.all(
+        TIMEFRAMES.map(async (tf) => {
+          try {
+            const res = await fetchCandles({ data: { symbol, timeframe: tf.id } });
+            return { tf: tf.id, res };
+          } catch (e: any) {
+            return { tf: tf.id, res: { candles: [], source: "yahoo", error: e?.message ?? "Fetch failed" } as any };
+          }
+        })
+      );
+      if (cancelled || myReq !== reqIdRef.current) return;
+
+      // Update chart candles from the active timeframe.
+      const active = results.find(r => r.tf === timeframe)!;
+      if (active.res.error || active.res.candles.length === 0) {
+        setFeedStatus("error");
+        setFeedError(active.res.error ?? "No candles returned");
+      } else {
+        setCandles(active.res.candles as Candle[]);
         setFeedStatus("live");
         setFeedError(null);
-      } catch (e: any) {
-        if (cancelled) return;
-        setFeedStatus("error");
-        setFeedError(e?.message ?? "Feed error");
       }
+
+      // Build a per-timeframe signal scan.
+      const nextScan: TfScan[] = results.map(({ tf, res }) => {
+        if (res.error || res.candles.length < 30) {
+          return { timeframe: tf, signal: null, error: res.error ?? "Not enough data" };
+        }
+        try {
+          const sig = generateSignal(res.candles as Candle[], symbol, tf);
+          return { timeframe: tf, signal: sig };
+        } catch (e: any) {
+          return { timeframe: tf, signal: null, error: e?.message ?? "Analysis failed" };
+        }
+      });
+      setScan(nextScan);
     };
 
     load();
     const id = setInterval(load, 5000);
     return () => { cancelled = true; clearInterval(id); };
   }, [symbol, timeframe, fetchCandles]);
+
+  // Best setup across all timeframes: highest confidence among BUY/SELL.
+  const bestScan = useMemo(() => {
+    const actionable = scan.filter(s => s.signal && s.signal.side !== "NONE");
+    if (actionable.length === 0) return null;
+    return actionable.reduce((a, b) => (b.signal!.confidence > a.signal!.confidence ? b : a));
+  }, [scan]);
+
 
 
   // Trade journal (persistent, powers learning + calendar)

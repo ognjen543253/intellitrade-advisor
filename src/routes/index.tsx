@@ -514,3 +514,111 @@ function MiniLevel({ label, value, tone = "default" }: { label: string; value: s
   );
 }
 
+type BestScanRow = { timeframe: Timeframe; signal: Signal | null; error?: string };
+
+function BestSetupCard({
+  scan, activeTf, digits, onJump,
+}: {
+  scan: BestScanRow[];
+  activeTf: Timeframe;
+  digits: number;
+  onJump: (tf: Timeframe) => void;
+}) {
+  const ranked = [...scan].sort((a, b) => {
+    const av = a.signal && a.signal.side !== "NONE" ? a.signal.confidence : -1;
+    const bv = b.signal && b.signal.side !== "NONE" ? b.signal.confidence : -1;
+    return bv - av;
+  });
+  const best = ranked.find(r => r.signal && r.signal.side !== "NONE") ?? null;
+
+  return (
+    <div className="rounded-xl border border-border/60 bg-surface p-4">
+      <div className="flex items-center gap-2">
+        <TrendingUp className="h-4 w-4 text-primary" />
+        <h3 className="text-sm font-semibold">Best Setup · All Timeframes</h3>
+      </div>
+      <p className="mt-1 text-[11px] text-muted-foreground">
+        The AI scans 1m, 5m, 15m, 1H and 4H every 5s and highlights the highest-confidence trade.
+      </p>
+
+      {best && best.signal ? (
+        <div className={cn(
+          "mt-3 rounded-lg border p-3",
+          best.signal.side === "BUY" ? "border-bull/40 bg-bull/5" : "border-bear/40 bg-bear/5",
+        )}>
+          <div className="flex items-center gap-2">
+            <span className={cn(
+              "rounded-md px-2 py-0.5 text-[11px] font-bold",
+              best.signal.side === "BUY" ? "bg-bull text-bull-foreground" : "bg-bear text-bear-foreground",
+            )}>
+              {best.signal.side}
+            </span>
+            <Pill tone="muted">{best.timeframe}</Pill>
+            <span className="ml-auto font-mono-tab text-xs font-semibold">
+              {best.signal.confidence}% · {best.signal.strength}
+            </span>
+          </div>
+          <div className="mt-2 grid grid-cols-3 gap-2 text-[10px]">
+            <div>
+              <div className="uppercase tracking-wider text-muted-foreground">Entry</div>
+              <div className="font-mono-tab text-xs font-semibold">{best.signal.entry.toFixed(digits)}</div>
+            </div>
+            <div>
+              <div className="uppercase tracking-wider text-muted-foreground">SL</div>
+              <div className="font-mono-tab text-xs font-semibold text-bear">{best.signal.stopLoss.toFixed(digits)}</div>
+            </div>
+            <div>
+              <div className="uppercase tracking-wider text-muted-foreground">TP2</div>
+              <div className="font-mono-tab text-xs font-semibold text-bull">{best.signal.takeProfit2.toFixed(digits)}</div>
+            </div>
+          </div>
+          {best.timeframe !== activeTf && (
+            <button
+              onClick={() => onJump(best.timeframe)}
+              className="mt-3 w-full rounded-md border border-primary/40 bg-primary/10 px-3 py-1.5 text-xs font-semibold text-primary hover:bg-primary/20"
+            >
+              Jump to {best.timeframe} chart
+            </button>
+          )}
+        </div>
+      ) : (
+        <p className="mt-3 rounded-lg border border-border/50 bg-background/40 p-3 text-[11px] text-muted-foreground">
+          No high-probability setup on any timeframe right now. The AI is waiting for confirmation.
+        </p>
+      )}
+
+      <div className="mt-3 space-y-1">
+        {ranked.map(row => {
+          const isActive = row.timeframe === activeTf;
+          const side = row.signal?.side ?? "NONE";
+          const conf = row.signal?.confidence ?? 0;
+          return (
+            <button
+              key={row.timeframe}
+              onClick={() => onJump(row.timeframe)}
+              className={cn(
+                "flex w-full items-center gap-2 rounded-md border px-2 py-1.5 text-left text-[11px] transition",
+                isActive ? "border-primary/40 bg-primary/5" : "border-border/50 bg-background/40 hover:bg-background",
+              )}
+            >
+              <span className="font-mono-tab w-8 font-semibold">{row.timeframe}</span>
+              <span className={cn(
+                "rounded px-1.5 py-0.5 text-[10px] font-bold",
+                side === "BUY" ? "bg-bull/20 text-bull"
+                  : side === "SELL" ? "bg-bear/20 text-bear"
+                  : "bg-muted text-muted-foreground",
+              )}>
+                {side}
+              </span>
+              <span className="ml-auto font-mono-tab text-muted-foreground">
+                {row.error ? row.error : `${conf}%`}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+

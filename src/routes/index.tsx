@@ -80,18 +80,34 @@ function TradingDashboard() {
 
 
   const ready = candles.length >= 30;
-  const analysis = useMemo(() => ready ? analyzeMarket(candles, symbol) : null, [candles, symbol, ready]);
-  const signal = useMemo(() => ready ? generateSignal(candles, symbol, timeframe) : null, [candles, symbol, timeframe, ready]);
-  const sizing = useMemo(
-    () => signal ? positionSize(accountBalance, riskPct, signal.entry, signal.stopLoss, meta.group === "Forex" ? 10 : 1) : { riskAmount: 0, lots: 0, units: 0 },
-    [accountBalance, riskPct, signal, meta.group],
-  );
 
-  const lastPrice = candles[candles.length - 1]?.close ?? 0;
+  if (!ready) {
+    return (
+      <div className="min-h-screen bg-background text-foreground">
+        <Header alertsOn={alertsOn} onToggleAlerts={() => setAlertsOn(v => !v)} />
+        <div className="mx-auto max-w-[1600px] px-4 py-16 text-center lg:px-6">
+          <div className="inline-flex items-center gap-2 rounded-full border border-border/60 bg-surface px-4 py-2">
+            <span className={cn("h-2 w-2 rounded-full ticker-pulse", feedStatus === "error" ? "bg-bear" : "bg-info")} />
+            <span className="text-sm">
+              {feedStatus === "error"
+                ? `Live feed error: ${feedError}`
+                : `Loading real ${meta.label} ${timeframe} candles from Yahoo Finance…`}
+            </span>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const analysis = analyzeMarket(candles, symbol);
+  const signal = generateSignal(candles, symbol, timeframe);
+  const sizing = positionSize(accountBalance, riskPct, signal.entry, signal.stopLoss, meta.group === "Forex" ? 10 : 1);
+
+  const lastPrice = candles[candles.length - 1].close;
   const prevPrice = candles[candles.length - 2]?.close ?? lastPrice;
   const priceUp = lastPrice >= prevPrice;
   const baseIdx = Math.max(0, candles.length - 96);
-  const change = candles.length > 1 ? lastPrice - candles[baseIdx].close : 0;
+  const change = lastPrice - candles[baseIdx].close;
   const changePct = lastPrice ? (change / lastPrice) * 100 : 0;
 
   // Trade journal (persistent, powers learning + calendar)

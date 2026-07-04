@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useServerFn } from "@tanstack/react-start";
 import { TradingChart } from "@/components/trading/TradingChart";
 import { SignalCard } from "@/components/trading/SignalCard";
 import { Pill, Stat } from "@/components/trading/Stat";
@@ -7,10 +8,11 @@ import { YearCalendar } from "@/components/trading/YearCalendar";
 import { LearningPanel } from "@/components/trading/LearningPanel";
 import { TradeLog } from "@/components/trading/TradeLog";
 import {
-  SYMBOLS, TIMEFRAMES, generateCandles, tickCandle,
+  SYMBOLS, TIMEFRAMES,
   type Symbol, type Timeframe, type Candle,
 } from "@/lib/trading/market-data";
 import { analyzeMarket, generateSignal, positionSize, type Signal } from "@/lib/trading/signals";
+import { fetchLiveCandles } from "@/lib/trading/live-feed.functions";
 import {
   getTrades, logTradeFromSignal, seedIfEmpty, subscribeTrades, performanceStats,
   type Trade,

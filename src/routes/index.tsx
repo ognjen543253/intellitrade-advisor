@@ -79,6 +79,18 @@ function TradingDashboard() {
   }, [symbol, timeframe, fetchCandles]);
 
 
+  // Trade journal (persistent, powers learning + calendar)
+  useEffect(() => { seedIfEmpty(); }, []);
+  const trades = useSyncExternalStore(subscribeTrades, getTrades, getTrades);
+  const stats = useMemo(() => performanceStats(trades), [trades]);
+  const symbolTrades = useMemo(() => trades.filter(t => t.symbol === symbol), [trades, symbol]);
+  const symbolStats = useMemo(() => performanceStats(symbolTrades), [symbolTrades]);
+
+  const activeTrade: Trade | undefined = useMemo(
+    () => trades.find(t => t.status === "open" && t.symbol === symbol && t.timeframe === timeframe),
+    [trades, symbol, timeframe],
+  );
+
   const ready = candles.length >= 30;
 
   if (!ready) {
@@ -110,27 +122,12 @@ function TradingDashboard() {
   const change = lastPrice - candles[baseIdx].close;
   const changePct = lastPrice ? (change / lastPrice) * 100 : 0;
 
-  // Trade journal (persistent, powers learning + calendar)
-  useEffect(() => { seedIfEmpty(); }, []);
-  const trades = useSyncExternalStore(subscribeTrades, getTrades, getTrades);
-  const stats = useMemo(() => performanceStats(trades), [trades]);
-  const symbolTrades = useMemo(() => trades.filter(t => t.symbol === symbol), [trades, symbol]);
-  const symbolStats = useMemo(() => performanceStats(symbolTrades), [symbolTrades]);
-
-  // Active open trade for this symbol+timeframe (freezes entry & TP, trails SL to break-even)
-  const activeTrade: Trade | undefined = useMemo(
-    () => trades.find(t => t.status === "open" && t.symbol === symbol && t.timeframe === timeframe),
-    [trades, symbol, timeframe],
-  );
-
-  // Trades are fully frozen once opened — entry, SL and TP never move.
-
-
   const handleLogTrade = (sig: Signal) => {
     if (sig.side === "NONE") return;
     if (activeTrade) return; // one open trade per symbol/timeframe — entry can't move
     logTradeFromSignal(sig, sizing.riskAmount || 100);
   };
+
 
   return (
     <div className="min-h-screen bg-background text-foreground">

@@ -79,18 +79,20 @@ function TradingDashboard() {
   }, [symbol, timeframe, fetchCandles]);
 
 
-  const analysis = useMemo(() => analyzeMarket(candles, symbol), [candles, symbol]);
-  const signal = useMemo(() => generateSignal(candles, symbol, timeframe), [candles, symbol, timeframe]);
+  const ready = candles.length >= 30;
+  const analysis = useMemo(() => ready ? analyzeMarket(candles, symbol) : null, [candles, symbol, ready]);
+  const signal = useMemo(() => ready ? generateSignal(candles, symbol, timeframe) : null, [candles, symbol, timeframe, ready]);
   const sizing = useMemo(
-    () => positionSize(accountBalance, riskPct, signal.entry, signal.stopLoss, meta.group === "Forex" ? 10 : 1),
+    () => signal ? positionSize(accountBalance, riskPct, signal.entry, signal.stopLoss, meta.group === "Forex" ? 10 : 1) : { riskAmount: 0, lots: 0, units: 0 },
     [accountBalance, riskPct, signal, meta.group],
   );
 
   const lastPrice = candles[candles.length - 1]?.close ?? 0;
   const prevPrice = candles[candles.length - 2]?.close ?? lastPrice;
   const priceUp = lastPrice >= prevPrice;
-  const change = lastPrice - candles[Math.max(0, candles.length - 96)].close;
-  const changePct = (change / lastPrice) * 100;
+  const baseIdx = Math.max(0, candles.length - 96);
+  const change = candles.length > 1 ? lastPrice - candles[baseIdx].close : 0;
+  const changePct = lastPrice ? (change / lastPrice) * 100 : 0;
 
   // Trade journal (persistent, powers learning + calendar)
   useEffect(() => { seedIfEmpty(); }, []);

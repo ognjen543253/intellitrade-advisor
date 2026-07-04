@@ -315,7 +315,7 @@ function TradingDashboard() {
         </div>
 
         <footer className="mt-8 border-t border-border/60 pt-4 pb-8 text-[11px] text-muted-foreground">
-          Sentinel AI runs on a high-fidelity simulated feed for demonstration. Plug in a live data provider to trade real markets.
+          Sentinel AI uses real market data from Yahoo Finance (delayed up to ~15 min for indices, real-time for FX). Prices refresh every 5 seconds.
         </footer>
       </div>
     </div>

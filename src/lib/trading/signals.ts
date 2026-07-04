@@ -165,9 +165,14 @@ export function generateSignal(c: Candle[], symbol: Symbol, tf: Timeframe): Sign
 
   let side: Side = "NONE";
   let checks = longChecks;
-  if (longPassed >= 7 && longPassed > shortPassed) { side = "BUY"; checks = longChecks; }
-  else if (shortPassed >= 7 && shortPassed > longPassed) { side = "SELL"; checks = shortChecks; }
-  else { side = "NONE"; checks = longPassed >= shortPassed ? longChecks : shortChecks; }
+  const MIN_PASS = 5; // majority of 9 confluences
+  if (longPassed >= MIN_PASS && longPassed > shortPassed) { side = "BUY"; checks = longChecks; }
+  else if (shortPassed >= MIN_PASS && shortPassed > longPassed) { side = "SELL"; checks = shortChecks; }
+  else if (longPassed === shortPassed && longPassed >= MIN_PASS) {
+    // Tie-breaker: follow the higher-timeframe trend bias
+    side = analysis.trend === "Bearish" ? "SELL" : "BUY";
+    checks = side === "SELL" ? shortChecks : longChecks;
+  } else { side = "NONE"; checks = longPassed >= shortPassed ? longChecks : shortChecks; }
 
   const atrVal = a[i];
   const slDist = atrVal * 1.5;

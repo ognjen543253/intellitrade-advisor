@@ -48,25 +48,43 @@ export interface LiveCandle {
   time: number; open: number; high: number; low: number; close: number; volume: number;
 }
 
+type LiveFeedResult = { candles: LiveCandle[]; source: string; error?: string };
+
+const SCAN_TIMEFRAMES = ["1m", "5m", "15m", "1h", "4h"] as const;
+
 export const fetchLiveCandles = createServerFn({ method: "GET" })
   .inputValidator((data: { symbol: string; timeframe: string }) => data)
-  .handler(async ({ data }): Promise<{ candles: LiveCandle[]; source: string; error?: string }> => {
-    const apiKey = process.env.TWELVE_DATA_API_KEY;
-
-    // Try Twelve Data first
-    if (apiKey) {
-      const td = await fromTwelveData(data.symbol, data.timeframe, apiKey);
-      if (td.candles.length > 0) return td;
-      // fall through to Yahoo on error/empty
-      const yh = await fromYahoo(data.symbol, data.timeframe);
-      if (yh.candles.length > 0) return { ...yh, source: "yahoo (fallback)", error: td.error };
-      return td;
-    }
-
-    return fromYahoo(data.symbol, data.timeframe);
+  .handler(async ({ data }): Promise<LiveFeedResult> => {
+    return loadLiveCandles(data.symbol, data.timeframe);
   });
 
-async function fromTwelveData(symbol: string, timeframe: string, apiKey: string): Promise<{ candles: LiveCandle[]; source: string; error?: string }> {
+export const fetchLiveScan = createServerFn({ method: "GET" })
+  .inputValidator((data: { symbol: string }) => data)
+  .handler(async ({ data }): Promise<{ rows: Array<LiveFeedResult & { timeframe: string }> }> => {
+    const rows = [];
+    for (const timeframe of SCAN_TIMEFRAMES) {
+      rows.push({ timeframe, ...(await loadLiveCandles(data.symbol, timeframe)) });
+    }
+    return { rows };
+  });
+
+async function loadLiveCandles(symbol: string, timeframe: string): Promise<LiveFeedResult> {
+  const apiKey = process.env.TWELVE_DATA_API_KEY;
+
+  // Try Twelve Data first.
+  if (apiKey) {
+    const td = await fromTwelveData(symbol, timeframe, apiKey);
+    if (td.candles.length > 0) return td;
+    // Fall through to Yahoo on provider errors, unsupported symbols, or quota limits.
+    const yh = await fromYahoo(symbol, timeframe);
+    if (yh.candles.length > 0) return { ...yh, source: "yahoo (fallback)" };
+    return td;
+  }
+
+  return fromYahoo(symbol, timeframe);
+}
+
+async function fromTwelveData(symbol: string, timeframe: string, apiKey: string): Promise<LiveFeedResult> {
   const tdSym = TD_SYMBOL[symbol];
   const tdInt = TD_INTERVAL[timeframe];
   if (!tdSym || !tdInt) {
@@ -96,7 +114,7 @@ async function fromTwelveData(symbol: string, timeframe: string, apiKey: string)
   }
 }
 
-async function fromYahoo(symbol: string, timeframe: string): Promise<{ candles: LiveCandle[]; source: string; error?: string }> {
+async function fromYahoo(symbol: string, timeframe: string): Promise<LiveFeedResult> {
   const ticker = YAHOO_TICKER[symbol];
   const cfg = YAHOO_TF[timeframe];
   if (!ticker || !cfg) {

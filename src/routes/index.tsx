@@ -12,7 +12,7 @@ import {
   type Symbol, type Timeframe, type Candle,
 } from "@/lib/trading/market-data";
 import { analyzeMarket, generateSignal, positionSize, type Signal } from "@/lib/trading/signals";
-import { fetchLiveCandles } from "@/lib/trading/live-feed.functions";
+import { fetchLiveCandles, fetchLiveScan } from "@/lib/trading/live-feed.functions";
 import {
   getTrades, logTradeFromSignal, seedIfEmpty, subscribeTrades, performanceStats,
   type Trade,
@@ -46,6 +46,7 @@ function TradingDashboard() {
   const [feedError, setFeedError] = useState<string | null>(null);
   const [feedSource, setFeedSource] = useState("market data");
   const fetchCandles = useServerFn(fetchLiveCandles);
+  const fetchScan = useServerFn(fetchLiveScan);
   const reqIdRef = useRef(0);
 
   // Multi-timeframe scan: signals across every TF for the current symbol.
@@ -93,11 +94,17 @@ function TradingDashboard() {
       }
     };
 
-    // Initial full scan across all timeframes (5 API credits).
+    // Initial full scan across all timeframes using one server request.
     const initialLoad = async () => {
-      const results = await Promise.all(TIMEFRAMES.map(t => fetchOne(t.id)));
+      let results: Array<{ tf: Timeframe; res: any }>;
+      try {
+        const scanRes = await fetchScan({ data: { symbol } });
+        results = scanRes.rows.map((row: any) => ({ tf: row.timeframe as Timeframe, res: row }));
+      } catch (e: any) {
+        results = [{ tf: timeframe, res: { candles: [], source: "unknown", error: e?.message ?? "Fetch failed" } }];
+      }
       if (cancelled || myReq !== reqIdRef.current) return;
-      const active = results.find(r => r.tf === timeframe)!;
+      const active = results.find(r => r.tf === timeframe) ?? results[0];
       applyActive(active.res);
       setScan(results.map(({ tf, res }) => buildScanRow(tf, res)));
     };
@@ -118,7 +125,7 @@ function TradingDashboard() {
     initialLoad();
     const id = setInterval(refreshActive, 30000);
     return () => { cancelled = true; clearInterval(id); };
-  }, [symbol, timeframe, fetchCandles]);
+  }, [symbol, timeframe, fetchCandles, fetchScan]);
 
 
 

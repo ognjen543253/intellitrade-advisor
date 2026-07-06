@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useServerFn } from "@tanstack/react-start";
-import { TradingChart } from "@/components/trading/TradingChart";
+import { TradingViewWidget } from "@/components/trading/TradingViewWidget";
 import { SignalCard } from "@/components/trading/SignalCard";
 import { Pill, Stat } from "@/components/trading/Stat";
 import { YearCalendar } from "@/components/trading/YearCalendar";
@@ -238,18 +238,11 @@ function TradingDashboard() {
         <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-[1fr_380px]">
           {/* Left: chart + dashboard */}
           <div className="flex min-w-0 flex-col gap-4">
-            <div className="relative h-[460px] overflow-hidden rounded-xl border border-border/60 bg-surface p-2 lg:h-[560px]">
-              <ChartLegend symbol={symbol} timeframe={timeframe} />
-              <TradingChart
-                candles={candles}
-                digits={meta.digits}
-                support={analysis.support}
-                resistance={analysis.resistance}
-                entry={activeTrade ? activeTrade.entry : (signal.side !== "NONE" ? signal.entry : undefined)}
-                stopLoss={activeTrade ? activeTrade.stopLoss : (signal.side !== "NONE" ? signal.stopLoss : undefined)}
-                takeProfit1={activeTrade ? activeTrade.takeProfit1 : (signal.side !== "NONE" ? signal.takeProfit1 : undefined)}
-                takeProfit2={activeTrade ? activeTrade.takeProfit2 : (signal.side !== "NONE" ? signal.takeProfit2 : undefined)}
-              />
+            <div className="relative h-[460px] overflow-hidden rounded-xl border border-border/60 bg-surface lg:h-[560px]">
+              <div className="absolute left-3 top-3 z-10 rounded-md border border-border/60 bg-background/85 px-2 py-1 text-[10px] font-medium backdrop-blur">
+                TradingView live chart · Sentinel signals below
+              </div>
+              <TradingViewWidget symbol={symbol} timeframe={timeframe} />
             </div>
 
             {/* Market dashboard */}
@@ -400,7 +393,7 @@ function TradingDashboard() {
         </div>
 
         <footer className="mt-8 border-t border-border/60 pt-4 pb-8 text-[11px] text-muted-foreground">
-          Sentinel AI uses Twelve Data first, then Yahoo Finance as backup when a symbol or quota is unavailable. Active charts refresh every 30 seconds.
+          Chart powered by TradingView. Sentinel AI uses Twelve Data first, then Yahoo Finance as backup for signal calculations when a symbol or quota is unavailable.
         </footer>
       </div>
     </div>

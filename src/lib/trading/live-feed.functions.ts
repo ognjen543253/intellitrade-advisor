@@ -58,6 +58,42 @@ export const fetchLiveCandles = createServerFn({ method: "GET" })
     return loadLiveCandles(data.symbol, data.timeframe);
   });
 
+export const fetchLivePrice = createServerFn({ method: "GET" })
+  .inputValidator((data: { symbol: string }) => data)
+  .handler(async ({ data }): Promise<{ price: number | null; source: string; error?: string }> => {
+    const apiKey = process.env.TWELVE_DATA_API_KEY;
+    if (apiKey) {
+      const tdSym = TD_SYMBOL[data.symbol];
+      if (tdSym) {
+        try {
+          const url = `https://api.twelvedata.com/price?symbol=${encodeURIComponent(tdSym)}&apikey=${apiKey}`;
+          const res = await fetch(url, { headers: { Accept: "application/json" } });
+          if (res.ok) {
+            const j: any = await res.json();
+            const p = parseFloat(j?.price);
+            if (isFinite(p)) return { price: p, source: "twelvedata" };
+          }
+        } catch {}
+      }
+    }
+    const ticker = YAHOO_TICKER[data.symbol];
+    if (ticker) {
+      try {
+        const url = `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?interval=1m&range=1d`;
+        const res = await fetch(url, {
+          headers: { "User-Agent": "Mozilla/5.0 (compatible; SentinelAI/1.0)", "Accept": "application/json" },
+        });
+        if (res.ok) {
+          const j: any = await res.json();
+          const meta = j?.chart?.result?.[0]?.meta;
+          const p = meta?.regularMarketPrice;
+          if (typeof p === "number" && isFinite(p)) return { price: p, source: "yahoo" };
+        }
+      } catch {}
+    }
+    return { price: null, source: "unknown", error: "No live price" };
+  });
+
 export const fetchLiveScan = createServerFn({ method: "GET" })
   .inputValidator((data: { symbol: string }) => data)
   .handler(async ({ data }): Promise<{ rows: Array<LiveFeedResult & { timeframe: string }> }> => {

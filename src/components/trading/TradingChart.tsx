@@ -34,7 +34,10 @@ export function TradingChart({ candles, support, resistance, entry, stopLoss, ta
 
   useEffect(() => {
     if (!containerRef.current) return;
+    const { width, height } = containerRef.current.getBoundingClientRect();
     const chart = createChart(containerRef.current, {
+      width: Math.max(1, Math.floor(width)),
+      height: Math.max(1, Math.floor(height)),
       layout: {
         background: { color: "transparent" },
         textColor: "#9ca3b3",
@@ -48,7 +51,6 @@ export function TradingChart({ candles, support, resistance, entry, stopLoss, ta
       rightPriceScale: { borderColor: "rgba(120,130,150,0.15)" },
       timeScale: { borderColor: "rgba(120,130,150,0.15)", timeVisible: true, secondsVisible: false },
       crosshair: { mode: 1 },
-      autoSize: true,
     });
     chartRef.current = chart;
 
@@ -72,7 +74,19 @@ export function TradingChart({ candles, support, resistance, entry, stopLoss, ta
     });
     chart.priceScale("").applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } });
 
-    return () => { chart.remove(); chartRef.current = null; };
+    const resizeObserver = new ResizeObserver(([entry]) => {
+      const nextWidth = Math.max(1, Math.floor(entry.contentRect.width));
+      const nextHeight = Math.max(1, Math.floor(entry.contentRect.height));
+      chart.applyOptions({ width: nextWidth, height: nextHeight });
+      chart.timeScale().fitContent();
+    });
+    resizeObserver.observe(containerRef.current);
+
+    return () => {
+      resizeObserver.disconnect();
+      chart.remove();
+      chartRef.current = null;
+    };
   }, [digits]);
 
   useEffect(() => {

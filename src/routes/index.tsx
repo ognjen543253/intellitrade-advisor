@@ -1,7 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useServerFn } from "@tanstack/react-start";
-import { TradingChart } from "@/components/trading/TradingChart";
 import { TradingViewWidget } from "@/components/trading/TradingViewWidget";
 import { SignalCard } from "@/components/trading/SignalCard";
 import { Pill, Stat } from "@/components/trading/Stat";

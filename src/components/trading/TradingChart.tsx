@@ -49,8 +49,16 @@ export function TradingChart({ candles, support, resistance, entry, stopLoss, ta
         horzLines: { color: "rgba(120,130,150,0.06)" },
       },
       rightPriceScale: { borderColor: "rgba(120,130,150,0.15)" },
-      timeScale: { borderColor: "rgba(120,130,150,0.15)", timeVisible: true, secondsVisible: false },
-      localization: { locale: "en-US" },
+      timeScale: {
+        borderColor: "rgba(120,130,150,0.15)",
+        timeVisible: true,
+        secondsVisible: false,
+        tickMarkFormatter: (time) => formatChartTime(Number(time)),
+      },
+      localization: {
+        locale: "en-US",
+        timeFormatter: (time) => formatChartTime(Number(time)),
+      },
       crosshair: { mode: 1 },
     });
     chartRef.current = chart;
@@ -153,4 +161,14 @@ function dedupeCandles(candles: Candle[]) {
 
 function isFinitePoint(point: { value: number }) {
   return Number.isFinite(point.value);
+}
+
+function formatChartTime(time: number) {
+  if (!Number.isFinite(time)) return "";
+  const date = new Date(time * 1000);
+  const month = String(date.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(date.getUTCDate()).padStart(2, "0");
+  const hour = String(date.getUTCHours()).padStart(2, "0");
+  const minute = String(date.getUTCMinutes()).padStart(2, "0");
+  return `${month}/${day} ${hour}:${minute}`;
 }

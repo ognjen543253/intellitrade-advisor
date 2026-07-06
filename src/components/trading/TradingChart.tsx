@@ -77,23 +77,26 @@ export function TradingChart({ candles, support, resistance, entry, stopLoss, ta
 
   useEffect(() => {
     if (!candleRef.current || candles.length === 0) return;
-    const candleData = candles.map(c => ({ time: c.time as Time, open: c.open, high: c.high, low: c.low, close: c.close }));
+    const cleanCandles = dedupeCandles(candles);
+    if (cleanCandles.length === 0) return;
+    const candleData = cleanCandles.map(c => ({ time: c.time as Time, open: c.open, high: c.high, low: c.low, close: c.close }));
     candleRef.current.setData(candleData);
 
-    const closes = candles.map(c => c.close);
+    const closes = cleanCandles.map(c => c.close);
     const e20 = ema(closes, 20);
     const e50 = ema(closes, 50);
     const e200 = ema(closes, 200);
-    const vw = vwap(candles);
-    ema20Ref.current?.setData(candles.map((c, i) => ({ time: c.time as Time, value: e20[i] })));
-    ema50Ref.current?.setData(candles.map((c, i) => ({ time: c.time as Time, value: e50[i] })));
-    ema200Ref.current?.setData(candles.map((c, i) => ({ time: c.time as Time, value: e200[i] })));
-    vwapRef.current?.setData(candles.map((c, i) => ({ time: c.time as Time, value: vw[i] })));
-    volRef.current?.setData(candles.map(c => ({
+    const vw = vwap(cleanCandles);
+    ema20Ref.current?.setData(cleanCandles.map((c, i) => ({ time: c.time as Time, value: e20[i] })).filter(isFinitePoint));
+    ema50Ref.current?.setData(cleanCandles.map((c, i) => ({ time: c.time as Time, value: e50[i] })).filter(isFinitePoint));
+    ema200Ref.current?.setData(cleanCandles.map((c, i) => ({ time: c.time as Time, value: e200[i] })).filter(isFinitePoint));
+    vwapRef.current?.setData(cleanCandles.map((c, i) => ({ time: c.time as Time, value: vw[i] })).filter(isFinitePoint));
+    volRef.current?.setData(cleanCandles.map(c => ({
       time: c.time as Time,
       value: c.volume,
       color: c.close >= c.open ? "rgba(34,197,94,0.45)" : "rgba(239,68,68,0.45)",
     })));
+    chartRef.current?.timeScale().fitContent();
   }, [candles]);
 
   // Price lines for SR + trade levels
@@ -115,4 +118,24 @@ export function TradingChart({ candles, support, resistance, entry, stopLoss, ta
   }, [support, resistance, entry, stopLoss, takeProfit1, takeProfit2]);
 
   return <div ref={containerRef} className="h-full w-full" />;
+}
+
+function dedupeCandles(candles: Candle[]) {
+  const byTime = new Map<number, Candle>();
+  for (const c of candles) {
+    if (
+      Number.isFinite(c.time) &&
+      Number.isFinite(c.open) &&
+      Number.isFinite(c.high) &&
+      Number.isFinite(c.low) &&
+      Number.isFinite(c.close)
+    ) {
+      byTime.set(c.time, c);
+    }
+  }
+  return Array.from(byTime.values()).sort((a, b) => a.time - b.time);
+}
+
+function isFinitePoint(point: { value: number }) {
+  return Number.isFinite(point.value);
 }

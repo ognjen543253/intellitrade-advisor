@@ -44,6 +44,7 @@ function TradingDashboard() {
   const [candles, setCandles] = useState<Candle[]>([]);
   const [feedStatus, setFeedStatus] = useState<"loading" | "live" | "error">("loading");
   const [feedError, setFeedError] = useState<string | null>(null);
+  const [feedSource, setFeedSource] = useState("market data");
   const fetchCandles = useServerFn(fetchLiveCandles);
   const reqIdRef = useRef(0);
 
@@ -77,6 +78,7 @@ function TradingDashboard() {
         setCandles(res.candles as Candle[]);
         setFeedStatus("live");
         setFeedError(null);
+        setFeedSource(res.source ?? "market data");
       }
     };
 
@@ -148,7 +150,7 @@ function TradingDashboard() {
             <span className="text-sm">
               {feedStatus === "error"
                 ? `Live feed error: ${feedError}`
-                : `Loading real ${meta.label} ${timeframe} candles from Yahoo Finance…`}
+                : `Loading real ${meta.label} ${timeframe} candles…`}
             </span>
           </div>
         </div>
@@ -199,7 +201,7 @@ function TradingDashboard() {
           <TimeframePicker value={timeframe} onChange={setTimeframe} />
           <div className="ml-auto flex items-center gap-2 text-[11px] text-muted-foreground">
             <Wifi className={cn("h-3 w-3", feedStatus === "live" ? "text-bull" : feedStatus === "error" ? "text-bear" : "text-muted-foreground")} />
-            {feedStatus === "error" ? `Feed error: ${feedError}` : `Live Yahoo Finance feed · ${analysis.sessionTag} session`}
+            {feedStatus === "error" ? `Feed error: ${feedError}` : `Live ${feedSource} feed · ${analysis.sessionTag} session`}
           </div>
         </div>
 
@@ -368,7 +370,7 @@ function TradingDashboard() {
         </div>
 
         <footer className="mt-8 border-t border-border/60 pt-4 pb-8 text-[11px] text-muted-foreground">
-          Sentinel AI uses real market data from Yahoo Finance (delayed up to ~15 min for indices, real-time for FX). Prices refresh every 5 seconds.
+          Sentinel AI uses Twelve Data first, then Yahoo Finance as backup when a symbol or quota is unavailable. Active charts refresh every 30 seconds.
         </footer>
       </div>
     </div>
@@ -549,7 +551,7 @@ function BestSetupCard({
         <h3 className="text-sm font-semibold">Best Setup · All Timeframes</h3>
       </div>
       <p className="mt-1 text-[11px] text-muted-foreground">
-        The AI scans 1m, 5m, 15m, 1H and 4H every 5s and highlights the highest-confidence trade.
+        The AI scans 1m, 5m, 15m, 1H and 4H, then highlights the highest-confidence trade.
       </p>
 
       {best && best.signal ? (

@@ -50,6 +50,7 @@ export function TradingChart({ candles, support, resistance, entry, stopLoss, ta
       },
       rightPriceScale: { borderColor: "rgba(120,130,150,0.15)" },
       timeScale: { borderColor: "rgba(120,130,150,0.15)", timeVisible: true, secondsVisible: false },
+      localization: { locale: "en-US" },
       crosshair: { mode: 1 },
     });
     chartRef.current = chart;

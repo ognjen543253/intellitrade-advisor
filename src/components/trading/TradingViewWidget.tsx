@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useEffect, useRef } from "react";
 import type { Symbol, Timeframe } from "@/lib/trading/market-data";
 
 const TV_SYMBOL: Record<Symbol, string> = {
@@ -27,32 +27,53 @@ interface TradingViewWidgetProps {
 }
 
 export function TradingViewWidget({ symbol, timeframe }: TradingViewWidgetProps) {
-  const src = useMemo(() => {
-    const params = new URLSearchParams({
-      frameElementId: `sentinel_tv_${symbol}_${timeframe}`,
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const config = {
+      autosize: true,
       symbol: TV_SYMBOL[symbol],
       interval: TV_INTERVAL[timeframe],
-      hidesidetoolbar: "0",
-      symboledit: "0",
-      saveimage: "0",
-      toolbarbg: "131722",
+      timezone: "Etc/UTC",
       theme: "dark",
       style: "1",
-      timezone: "Etc/UTC",
-      withdateranges: "1",
-      hideideas: "1",
       locale: "en",
-    });
-    return `https://www.tradingview.com/widgetembed/?${params.toString()}`;
+      enable_publishing: false,
+      hide_top_toolbar: false,
+      hide_legend: false,
+      hide_side_toolbar: false,
+      allow_symbol_change: false,
+      save_image: false,
+      calendar: false,
+      support_host: "https://www.tradingview.com",
+    };
+
+    const configKey = JSON.stringify(config);
+    if (container.dataset.tvConfig === configKey) return;
+
+    container.dataset.tvConfig = configKey;
+    container.replaceChildren();
+
+    const widgetSlot = document.createElement("div");
+    widgetSlot.className = "tradingview-widget-container__widget h-full w-full";
+    container.appendChild(widgetSlot);
+
+    const script = document.createElement("script");
+    script.src = "https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js";
+    script.async = true;
+    script.type = "text/javascript";
+    script.text = configKey;
+    container.appendChild(script);
   }, [symbol, timeframe]);
 
   return (
-    <iframe
-      key={`${symbol}-${timeframe}`}
-      title={`${symbol} live TradingView chart`}
-      src={src}
-      className="h-full w-full border-0"
-      allow="fullscreen"
+    <div
+      ref={containerRef}
+      className="tradingview-widget-container h-full w-full"
+      aria-label={`${symbol} live TradingView chart`}
     />
   );
 }

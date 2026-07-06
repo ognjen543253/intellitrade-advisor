@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useMemo } from "react";
 import type { Symbol, Timeframe } from "@/lib/trading/market-data";
 
 const TV_SYMBOL: Record<Symbol, string> = {
@@ -27,53 +27,34 @@ interface TradingViewWidgetProps {
 }
 
 export function TradingViewWidget({ symbol, timeframe }: TradingViewWidgetProps) {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const widgetId = useMemo(
-    () => `tradingview_${symbol.toLowerCase()}_${timeframe.replace(/[^a-z0-9]/gi, "")}`,
-    [symbol, timeframe],
-  );
-
-  useEffect(() => {
-    const container = containerRef.current;
-    if (!container) return;
-
-    container.innerHTML = "";
-    const widgetSlot = document.createElement("div");
-    widgetSlot.className = "tradingview-widget-container__widget h-full w-full";
-    widgetSlot.style.height = "100%";
-    widgetSlot.style.width = "100%";
-    container.appendChild(widgetSlot);
-
-    const script = document.createElement("script");
-    script.src = "https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js";
-    script.async = true;
-    script.type = "text/javascript";
-    script.innerHTML = JSON.stringify({
-      autosize: true,
+  const src = useMemo(() => {
+    const params = new URLSearchParams({
+      frameElementId: `sentinel_tv_${symbol}_${timeframe}`,
       symbol: TV_SYMBOL[symbol],
       interval: TV_INTERVAL[timeframe],
-      timezone: "Etc/UTC",
+      hidesidetoolbar: "0",
+      symboledit: "0",
+      saveimage: "0",
+      toolbarbg: "131722",
       theme: "dark",
       style: "1",
+      timezone: "Etc/UTC",
+      withdateranges: "1",
+      hideideas: "1",
       locale: "en",
-      enable_publishing: false,
-      backgroundColor: "rgba(0, 0, 0, 0)",
-      gridColor: "rgba(120, 130, 150, 0.08)",
-      hide_top_toolbar: false,
-      hide_legend: false,
-      hide_side_toolbar: false,
-      allow_symbol_change: false,
-      save_image: false,
-      calendar: false,
-      studies: ["STD;EMA", "STD;VWAP"],
-      support_host: "https://www.tradingview.com",
+      studies: "[\"STD;EMA\",\"STD;VWAP\"]",
+      backgroundColor: "131722",
     });
-    container.appendChild(script);
+    return `https://www.tradingview.com/widgetembed/?${params.toString()}`;
+  }, [symbol, timeframe]);
 
-    return () => {
-      container.innerHTML = "";
-    };
-  }, [symbol, timeframe, widgetId]);
-
-  return <div ref={containerRef} className="tradingview-widget-container h-full w-full" />;
+  return (
+    <iframe
+      key={`${symbol}-${timeframe}`}
+      title={`${symbol} live TradingView chart`}
+      src={src}
+      className="h-full w-full border-0"
+      allow="fullscreen"
+    />
+  );
 }

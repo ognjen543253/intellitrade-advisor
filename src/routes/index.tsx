@@ -47,6 +47,7 @@ function TradingDashboard() {
   const [feedSource, setFeedSource] = useState("market data");
   const fetchCandles = useServerFn(fetchLiveCandles);
   const fetchScan = useServerFn(fetchLiveScan);
+  const fetchPrice = useServerFn(fetchLivePrice);
   const reqIdRef = useRef(0);
 
   // Multi-timeframe scan: signals across every TF for the current symbol.

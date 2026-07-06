@@ -12,7 +12,7 @@ import {
   type Symbol, type Timeframe, type Candle,
 } from "@/lib/trading/market-data";
 import { analyzeMarket, generateSignal, positionSize, type Signal } from "@/lib/trading/signals";
-import { fetchLiveCandles, fetchLiveScan } from "@/lib/trading/live-feed.functions";
+import { fetchLiveCandles, fetchLiveScan, fetchLivePrice } from "@/lib/trading/live-feed.functions";
 import {
   getTrades, logTradeFromSignal, seedIfEmpty, subscribeTrades, performanceStats,
   type Trade,
@@ -47,6 +47,7 @@ function TradingDashboard() {
   const [feedSource, setFeedSource] = useState("market data");
   const fetchCandles = useServerFn(fetchLiveCandles);
   const fetchScan = useServerFn(fetchLiveScan);
+  const fetchPrice = useServerFn(fetchLivePrice);
   const reqIdRef = useRef(0);
 
   // Multi-timeframe scan: signals across every TF for the current symbol.
@@ -123,9 +124,31 @@ function TradingDashboard() {
     };
 
     initialLoad();
-    const id = setInterval(refreshActive, 30000);
-    return () => { cancelled = true; clearInterval(id); };
-  }, [symbol, timeframe, fetchCandles, fetchScan]);
+    const candleId = setInterval(refreshActive, 20000);
+
+    // Fast price ticker: patches the last candle's close/high/low so the
+    // chart moves in near real-time between full candle refreshes.
+    const tickPrice = async () => {
+      try {
+        const { price } = await fetchPrice({ data: { symbol } });
+        if (cancelled || myReq !== reqIdRef.current || price == null) return;
+        setCandles(prev => {
+          if (prev.length === 0) return prev;
+          const last = prev[prev.length - 1];
+          if (!isFinite(price) || price === last.close) return prev;
+          const patched = {
+            ...last,
+            close: price,
+            high: Math.max(last.high, price),
+            low: Math.min(last.low, price),
+          };
+          return [...prev.slice(0, -1), patched];
+        });
+      } catch {}
+    };
+    const priceId = setInterval(tickPrice, 6000);
+    return () => { cancelled = true; clearInterval(candleId); clearInterval(priceId); };
+  }, [symbol, timeframe, fetchCandles, fetchScan, fetchPrice]);
 
 
 

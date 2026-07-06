@@ -51,58 +51,73 @@ function TradingDashboard() {
   type TfScan = { timeframe: Timeframe; signal: Signal | null; error?: string };
   const [scan, setScan] = useState<TfScan[]>([]);
 
-  // Fetch real market data from Yahoo Finance via server function, poll every 5s.
-  // Also scan every timeframe in parallel to surface the best setup.
+  // Fetch real market data. Twelve Data free tier allows ~8 calls/min and
+  // 800/day, so poll conservatively: full multi-TF scan on symbol change,
+  // then only the active timeframe every 30s.
   useEffect(() => {
     let cancelled = false;
     const myReq = ++reqIdRef.current;
     setFeedStatus("loading");
     setFeedError(null);
 
-    const load = async () => {
-      // Fetch all timeframes in parallel; the active one drives the chart.
-      const results = await Promise.all(
-        TIMEFRAMES.map(async (tf) => {
-          try {
-            const res = await fetchCandles({ data: { symbol, timeframe: tf.id } });
-            return { tf: tf.id, res };
-          } catch (e: any) {
-            return { tf: tf.id, res: { candles: [], source: "yahoo", error: e?.message ?? "Fetch failed" } as any };
-          }
-        })
-      );
-      if (cancelled || myReq !== reqIdRef.current) return;
+    const fetchOne = async (tf: Timeframe) => {
+      try {
+        const res = await fetchCandles({ data: { symbol, timeframe: tf } });
+        return { tf, res };
+      } catch (e: any) {
+        return { tf, res: { candles: [], source: "unknown", error: e?.message ?? "Fetch failed" } as any };
+      }
+    };
 
-      // Update chart candles from the active timeframe.
-      const active = results.find(r => r.tf === timeframe)!;
-      if (active.res.error || active.res.candles.length === 0) {
+    const applyActive = (res: any) => {
+      if (res.error || res.candles.length === 0) {
         setFeedStatus("error");
-        setFeedError(active.res.error ?? "No candles returned");
+        setFeedError(res.error ?? "No candles returned");
       } else {
-        setCandles(active.res.candles as Candle[]);
+        setCandles(res.candles as Candle[]);
         setFeedStatus("live");
         setFeedError(null);
       }
-
-      // Build a per-timeframe signal scan.
-      const nextScan: TfScan[] = results.map(({ tf, res }) => {
-        if (res.error || res.candles.length < 30) {
-          return { timeframe: tf, signal: null, error: res.error ?? "Not enough data" };
-        }
-        try {
-          const sig = generateSignal(res.candles as Candle[], symbol, tf);
-          return { timeframe: tf, signal: sig };
-        } catch (e: any) {
-          return { timeframe: tf, signal: null, error: e?.message ?? "Analysis failed" };
-        }
-      });
-      setScan(nextScan);
     };
 
-    load();
-    const id = setInterval(load, 5000);
+    const buildScanRow = (tf: Timeframe, res: any): TfScan => {
+      if (res.error || res.candles.length < 30) {
+        return { timeframe: tf, signal: null, error: res.error ?? "Not enough data" };
+      }
+      try {
+        return { timeframe: tf, signal: generateSignal(res.candles as Candle[], symbol, tf) };
+      } catch (e: any) {
+        return { timeframe: tf, signal: null, error: e?.message ?? "Analysis failed" };
+      }
+    };
+
+    // Initial full scan across all timeframes (5 API credits).
+    const initialLoad = async () => {
+      const results = await Promise.all(TIMEFRAMES.map(t => fetchOne(t.id)));
+      if (cancelled || myReq !== reqIdRef.current) return;
+      const active = results.find(r => r.tf === timeframe)!;
+      applyActive(active.res);
+      setScan(results.map(({ tf, res }) => buildScanRow(tf, res)));
+    };
+
+    // Refresh only the active timeframe (1 API credit).
+    const refreshActive = async () => {
+      const { res } = await fetchOne(timeframe);
+      if (cancelled || myReq !== reqIdRef.current) return;
+      applyActive(res);
+      setScan(prev => {
+        const row = buildScanRow(timeframe, res);
+        const next = prev.filter(r => r.timeframe !== timeframe);
+        next.push(row);
+        return next;
+      });
+    };
+
+    initialLoad();
+    const id = setInterval(refreshActive, 30000);
     return () => { cancelled = true; clearInterval(id); };
   }, [symbol, timeframe, fetchCandles]);
+
 
 
 

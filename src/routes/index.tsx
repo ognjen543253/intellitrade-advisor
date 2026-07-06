@@ -12,7 +12,7 @@ import {
   type Symbol, type Timeframe, type Candle,
 } from "@/lib/trading/market-data";
 import { analyzeMarket, generateSignal, positionSize, type Signal } from "@/lib/trading/signals";
-import { fetchLiveCandles, fetchLiveScan } from "@/lib/trading/live-feed.functions";
+import { fetchLiveCandles, fetchLiveScan, fetchLivePrice } from "@/lib/trading/live-feed.functions";
 import {
   getTrades, logTradeFromSignal, seedIfEmpty, subscribeTrades, performanceStats,
   type Trade,

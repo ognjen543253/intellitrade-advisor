@@ -39,8 +39,9 @@ export function TradingViewWidget({ symbol, timeframe }: TradingViewWidgetProps)
 
     container.innerHTML = "";
     const widgetSlot = document.createElement("div");
-    widgetSlot.id = widgetId;
-    widgetSlot.className = "h-full w-full";
+    widgetSlot.className = "tradingview-widget-container__widget h-full w-full";
+    widgetSlot.style.height = "100%";
+    widgetSlot.style.width = "100%";
     container.appendChild(widgetSlot);
 
     const script = document.createElement("script");
@@ -65,7 +66,6 @@ export function TradingViewWidget({ symbol, timeframe }: TradingViewWidgetProps)
       save_image: false,
       calendar: false,
       studies: ["STD;EMA", "STD;VWAP"],
-      container_id: widgetId,
       support_host: "https://www.tradingview.com",
     });
     container.appendChild(script);

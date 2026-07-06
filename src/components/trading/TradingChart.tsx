@@ -53,11 +53,11 @@ export function TradingChart({ candles, support, resistance, entry, stopLoss, ta
         borderColor: "rgba(120,130,150,0.15)",
         timeVisible: true,
         secondsVisible: false,
-        tickMarkFormatter: (time) => formatChartTime(Number(time)),
+        tickMarkFormatter: (time: Time) => formatChartTime(Number(time)),
       },
       localization: {
         locale: "en-US",
-        timeFormatter: (time) => formatChartTime(Number(time)),
+        timeFormatter: (time: Time) => formatChartTime(Number(time)),
       },
       crosshair: { mode: 1 },
     });

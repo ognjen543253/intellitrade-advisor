@@ -59,7 +59,7 @@ export const fetchLiveCandles = createServerFn({ method: "GET" })
       if (td.candles.length > 0) return td;
       // fall through to Yahoo on error/empty
       const yh = await fromYahoo(data.symbol, data.timeframe);
-      if (yh.candles.length > 0) return { ...yh, source: "yahoo (fallback)", error: td.error };
+      if (yh.candles.length > 0) return { ...yh, source: "yahoo (fallback)" };
       return td;
     }
 

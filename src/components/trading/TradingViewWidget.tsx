@@ -42,8 +42,6 @@ export function TradingViewWidget({ symbol, timeframe }: TradingViewWidgetProps)
       withdateranges: "1",
       hideideas: "1",
       locale: "en",
-      studies: "[\"STD;EMA\",\"STD;VWAP\"]",
-      backgroundColor: "131722",
     });
     return `https://www.tradingview.com/widgetembed/?${params.toString()}`;
   }, [symbol, timeframe]);

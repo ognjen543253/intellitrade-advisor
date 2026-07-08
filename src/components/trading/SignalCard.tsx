@@ -95,16 +95,26 @@ export function SignalCard({ signal, digits, onLogTrade }: Props) {
         {signal.explanation}
       </p>
 
+      <div className="mt-3 rounded-lg border border-info/30 bg-info/5 p-3">
+        <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-info">
+          AI Summary
+        </div>
+        <p className="mt-1 text-[12px] leading-relaxed text-foreground/90">{signal.aiSummary}</p>
+      </div>
+
+      <div className="mt-3 grid grid-cols-3 gap-2">
+        <MiniScore label="Bull" value={signal.bullScore} tone="bull" />
+        <MiniScore label="Bear" value={signal.bearScore} tone="bear" />
+        <MiniScore label="Quality" value={signal.qualityScore} tone="info" />
+      </div>
+
       <div className="mt-4">
-        <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Confluence checklist</div>
-        <div className="mt-2 grid grid-cols-1 gap-1.5 sm:grid-cols-3">
-          {signal.checks.map((c) => (
-            <div key={c.label} className="flex items-center gap-1.5 text-[11px]">
-              {c.pass
-                ? <Check className={cn("h-3 w-3", isBuy ? "text-bull" : "text-bear")} />
-                : <X className="h-3 w-3 text-muted-foreground/50" />}
-              <span className={c.pass ? "text-foreground" : "text-muted-foreground/60"}>{c.label}</span>
-            </div>
+        <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
+          Weighted score breakdown
+        </div>
+        <div className="mt-2 space-y-1">
+          {signal.scoreBreakdown.map((ctr) => (
+            <ScoreRow key={ctr.key} ctr={ctr} />
           ))}
         </div>
       </div>
@@ -123,3 +133,52 @@ function Level({ label, value, tone = "default" }: { label: string; value: strin
     </div>
   );
 }
+
+function MiniScore({ label, value, tone }: { label: string; value: number; tone: "bull" | "bear" | "info" }) {
+  const bar = Math.max(0, Math.min(100, value));
+  const toneClass = tone === "bull" ? "bg-bull" : tone === "bear" ? "bg-bear" : "bg-info";
+  const textTone = tone === "bull" ? "text-bull" : tone === "bear" ? "text-bear" : "text-info";
+  return (
+    <div className="rounded-lg border border-border/50 bg-background/40 px-2 py-2">
+      <div className="flex items-baseline justify-between">
+        <span className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</span>
+        <span className={cn("font-mono-tab text-sm font-semibold", textTone)}>{Math.round(value)}</span>
+      </div>
+      <div className="mt-1 h-1 w-full overflow-hidden rounded-full bg-border/60">
+        <div className={cn("h-full rounded-full transition-all", toneClass)} style={{ width: `${bar}%` }} />
+      </div>
+    </div>
+  );
+}
+
+function ScoreRow({
+  ctr,
+}: {
+  ctr: import("@/lib/trading/signals").ScoreContribution;
+}) {
+  const pct = ctr.weight ? (ctr.score / ctr.weight) * 100 : 0;
+  const magnitude = Math.min(100, Math.abs(pct));
+  const isBull = ctr.side === "bull";
+  const isBear = ctr.side === "bear";
+  const barColor = isBull ? "bg-bull" : isBear ? "bg-bear" : "bg-info";
+  const textColor = isBull ? "text-bull" : isBear ? "text-bear" : "text-info";
+  return (
+    <div className="grid grid-cols-[130px_1fr_auto] items-center gap-2 text-[11px]">
+      <span className="truncate text-foreground/90" title={ctr.label}>
+        {ctr.label}
+      </span>
+      <div className="relative h-1.5 w-full rounded-full bg-border/40">
+        <div
+          className={cn("absolute top-0 h-full rounded-full", barColor, pct < 0 ? "right-1/2" : "left-1/2")}
+          style={{ width: `${magnitude / 2}%` }}
+        />
+        <div className="absolute left-1/2 top-1/2 h-2.5 w-px -translate-y-1/2 bg-border" />
+      </div>
+      <span className={cn("font-mono-tab tabular-nums", textColor)}>
+        {ctr.score >= 0 ? "+" : ""}
+        {ctr.score.toFixed(1)}
+      </span>
+    </div>
+  );
+}
+

@@ -720,6 +720,7 @@ export function generateSignal(c: Candle[], symbol: Symbol, tf: Timeframe): Sign
     explanation,
     aiSummary,
     scoreBreakdown: contribs,
+    diagnostics,
     checks,
     createdAt: Date.now(),
     atr: atrVal,

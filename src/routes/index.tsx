@@ -187,6 +187,16 @@ function TradingDashboard() {
 
   const ready = candles.length >= 30;
 
+  // Record every evaluation (fired or rejected) into the diagnostics store.
+  // Must run before any early return to keep hook order stable.
+  useEffect(() => {
+    if (ready) {
+      const sig = generateSignal(candles, symbol, timeframe);
+      recordSignal(sig);
+    }
+    for (const row of scan) if (row.signal) recordSignal(row.signal);
+  }, [ready, candles, symbol, timeframe, scan]);
+
   if (!ready) {
     return (
       <div className="min-h-screen bg-background text-foreground">
@@ -208,12 +218,6 @@ function TradingDashboard() {
   const analysis = analyzeMarket(candles, symbol);
   const signal = generateSignal(candles, symbol, timeframe);
   const sizing = positionSize(accountBalance, riskPct, signal.entry, signal.stopLoss, meta.group === "Forex" ? 10 : 1);
-
-  // Record every evaluation (fired or rejected) into the diagnostics store.
-  useEffect(() => {
-    recordSignal(signal);
-    for (const row of scan) if (row.signal) recordSignal(row.signal);
-  }, [signal, scan]);
 
   const lastPrice = candles[candles.length - 1].close;
   const prevPrice = candles[candles.length - 2]?.close ?? lastPrice;

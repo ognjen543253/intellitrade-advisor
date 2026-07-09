@@ -194,6 +194,12 @@ function TradingDashboard() {
   const signal = generateSignal(candles, symbol, timeframe);
   const sizing = positionSize(accountBalance, riskPct, signal.entry, signal.stopLoss, meta.group === "Forex" ? 10 : 1);
 
+  // Record every evaluation (fired or rejected) into the diagnostics store.
+  useEffect(() => {
+    recordSignal(signal);
+    for (const row of scan) if (row.signal) recordSignal(row.signal);
+  }, [signal, scan]);
+
   const lastPrice = candles[candles.length - 1].close;
   const prevPrice = candles[candles.length - 2]?.close ?? lastPrice;
   const priceUp = lastPrice >= prevPrice;

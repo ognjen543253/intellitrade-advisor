@@ -86,15 +86,20 @@ function TradingDashboard() {
       }
     };
 
-    const buildScanRow = (tf: Timeframe, res: any): TfScan => {
+    const buildScanRow = (tf: Timeframe, res: any, htfBias?: { trend: "Bullish" | "Bearish" | "Sideways"; strength: number }): TfScan => {
       if (res.error || res.candles.length < 30) {
         return { timeframe: tf, signal: null, error: res.error ?? "Not enough data" };
       }
       try {
-        return { timeframe: tf, signal: generateSignal(res.candles as Candle[], symbol, tf) };
+        return { timeframe: tf, signal: generateSignal(res.candles as Candle[], symbol, tf, { htfBias }) };
       } catch (e: any) {
         return { timeframe: tf, signal: null, error: e?.message ?? "Analysis failed" };
       }
+    };
+
+    // Higher-timeframe map for MTF continuation logic.
+    const HTF: Record<Timeframe, Timeframe | null> = {
+      "1m": "15m", "5m": "1h", "15m": "4h", "1h": "4h", "4h": null,
     };
 
     // Initial full scan across all timeframes using one server request.
@@ -109,7 +114,17 @@ function TradingDashboard() {
       if (cancelled || myReq !== reqIdRef.current) return;
       const active = results.find(r => r.tf === timeframe) ?? results[0];
       applyActive(active.res);
-      setScan(results.map(({ tf, res }) => buildScanRow(tf, res)));
+      // First pass — HTF-less. Then second pass with HTF bias from the higher TF's signal.
+      const firstPass = new Map(results.map(({ tf, res }) => [tf, buildScanRow(tf, res)]));
+      const finalRows: TfScan[] = results.map(({ tf, res }) => {
+        const htfTf = HTF[tf];
+        const htfRow = htfTf ? firstPass.get(htfTf) : undefined;
+        const htfBias = htfRow?.signal
+          ? { trend: htfRow.signal.trend, strength: htfRow.signal.probability }
+          : undefined;
+        return buildScanRow(tf, res, htfBias);
+      });
+      setScan(finalRows);
     };
 
     // Refresh only the active timeframe (1 API credit).

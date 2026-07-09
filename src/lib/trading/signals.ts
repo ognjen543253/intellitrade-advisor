@@ -1,6 +1,14 @@
-// IntelliTrade Quant Engine — Phase 1 (weighted scoring) + Phase 6 (AI summary).
-// Each contributor scores independently, is weighted per CONFIG, and normalized
-// into a single 0-100 confidence with a per-signal breakdown for the UI.
+// IntelliTrade Quant Engine — probability-based signal engine.
+//
+// Design principles:
+//  1. Structure first: swing HH/HL determines bias before any indicator runs.
+//  2. Weighted probability, not confirmation counting. Indicators trim or add
+//     probability; they never veto a setup on their own.
+//  3. Setup recognition: pattern must be named (Trend Pullback, Breakout,
+//     Retest, Failed Breakout, Range Bounce, etc.) — no name, no A-grade.
+//  4. Only hard rejects are: spread eats stop, or probability < gradeC AND no
+//     recognizable setup. Everything else is graded C / B / A / A+.
+//  5. Cached indicator pass — analyzeMarket + generateSignal share one compute.
 
 import {
   atr,
@@ -22,15 +30,23 @@ import {
   relativeVolume,
   rsiDivergence,
 } from "./indicators";
-import { CONFIG, QUALITY_SIGNALS, SIGNAL_LABELS, type SignalKey } from "./config";
+import {
+  CONFIG,
+  QUALITY_SIGNALS,
+  SIGNAL_LABELS,
+  gradeFor,
+  type Grade,
+  type SetupType,
+  type SignalKey,
+} from "./config";
 
 export type Side = "BUY" | "SELL" | "NONE";
 
 export interface ScoreContribution {
   key: SignalKey;
   label: string;
-  score: number; // signed for directional signals, positive for quality
-  weight: number; // max magnitude
+  score: number;
+  weight: number;
   side: "bull" | "bear" | "neutral";
   detail: string;
 }
@@ -42,7 +58,6 @@ export interface FilterCheck {
   actual: number;
   required: number;
   unit?: string;
-  /** 0..1 — how close to passing (1 = passing, 0 = far). */
   progress: number;
   detail: string;
 }
@@ -61,12 +76,18 @@ export interface SignalDiagnostics {
   qualityMultiplier: number;
   dominantSide: "BUY" | "SELL";
   filters: FilterCheck[];
-  /** First filter (in eval order) that failed. */
   blockingFilter: FilterCheck | null;
-  /** Failed filters ranked by proximity to passing. */
   closestToPassing: FilterCheck[];
-  /** Plain-English reason. Empty when the signal fires. */
   rejectionReason: string;
+  // NEW — probability engine additions.
+  probability: number;
+  bullProbability: number;
+  bearProbability: number;
+  grade: Grade;
+  setup: SetupType;
+  topBoosters: { label: string; delta: number }[];
+  topReducers: { label: string; delta: number }[];
+  needToPass: string;
 }
 
 export interface Signal {
@@ -79,10 +100,10 @@ export interface Signal {
   takeProfit1: number;
   takeProfit2: number;
   riskReward: number;
-  confidence: number; // 0..100
-  bullScore: number; // 0..100 normalized
-  bearScore: number; // 0..100 normalized
-  qualityScore: number; // 0..100 normalized
+  confidence: number;
+  bullScore: number;
+  bearScore: number;
+  qualityScore: number;
   trend: "Bullish" | "Bearish" | "Sideways";
   strength: "Weak" | "Moderate" | "Strong";
   reasons: string[];
@@ -90,12 +111,20 @@ export interface Signal {
   aiSummary: string;
   scoreBreakdown: ScoreContribution[];
   diagnostics: SignalDiagnostics;
-  // Legacy — kept so SignalCard's checklist still renders.
   checks: { label: string; pass: boolean }[];
   createdAt: number;
   atr: number;
   rsi: number;
   spread: number;
+  // NEW — probability outputs.
+  probability: number;
+  grade: Grade;
+  setup: SetupType;
+  expectedMove: number;
+  expectedHoldingBars: number;
+  expectedHoldingLabel: string;
+  expectedTrendStrength: "Weak" | "Moderate" | "Strong" | "Very Strong";
+  expectedRiskReward: number;
 }
 
 export interface MarketAnalysis {
@@ -113,7 +142,91 @@ export interface MarketAnalysis {
   spread: number;
   sessionTag: "Asia" | "London" | "New York" | "Overlap" | "After Hours";
   signalStrength: number;
+  structure: "HH-HL" | "LH-LL" | "Choppy";
 }
+
+// ---- Shared indicator cache ------------------------------------------------
+// Recomputes are keyed on last-candle time so back-to-back calls (analyze +
+// signal) share one pass instead of running EMA/RSI/MACD/ADX/BB twice.
+
+interface IndicatorPack {
+  closes: number[];
+  e20: number[];
+  e50: number[];
+  e200: number[];
+  r: number[];
+  m: ReturnType<typeof macd>;
+  a: number[];
+  v: number[];
+  bb: ReturnType<typeof bollinger>;
+  adxRes: ReturnType<typeof adx>;
+  sr: { support: number; resistance: number };
+  swings: { highs: number[]; lows: number[] };
+}
+
+const indicatorCache = new Map<string, { key: string; pack: IndicatorPack }>();
+
+function computeIndicators(c: Candle[], symbol: Symbol, tf: Timeframe): IndicatorPack {
+  const cfg = CONFIG.indicators;
+  const cacheKey = `${symbol}:${tf}`;
+  const version = `${c.length}:${c[c.length - 1].time}:${c[c.length - 1].close}`;
+  const hit = indicatorCache.get(cacheKey);
+  if (hit && hit.key === version) return hit.pack;
+
+  const closes = c.map((k) => k.close);
+  const pack: IndicatorPack = {
+    closes,
+    e20: ema(closes, cfg.emaFast),
+    e50: ema(closes, cfg.emaMid),
+    e200: ema(closes, cfg.emaSlow),
+    r: rsi(closes, cfg.rsiPeriod),
+    m: macd(closes),
+    a: atr(c, cfg.atrPeriod),
+    v: vwap(c),
+    bb: bollinger(closes, cfg.bbPeriod, cfg.bbStdDev),
+    adxRes: adx(c, cfg.adxPeriod),
+    sr: findSupportResistance(c),
+    swings: findSwings(c, cfg.swingLookback),
+  };
+  indicatorCache.set(cacheKey, { key: version, pack });
+  return pack;
+}
+
+// ---- Structure primitives --------------------------------------------------
+
+function findSwings(c: Candle[], k = 5): { highs: number[]; lows: number[] } {
+  const highs: number[] = [];
+  const lows: number[] = [];
+  for (let i = k; i < c.length - k; i++) {
+    let isHigh = true;
+    let isLow = true;
+    for (let j = 1; j <= k; j++) {
+      if (c[i - j].high >= c[i].high || c[i + j].high >= c[i].high) isHigh = false;
+      if (c[i - j].low <= c[i].low || c[i + j].low <= c[i].low) isLow = false;
+    }
+    if (isHigh) highs.push(i);
+    if (isLow) lows.push(i);
+  }
+  return { highs, lows };
+}
+
+function classifyStructure(
+  c: Candle[],
+  swings: { highs: number[]; lows: number[] },
+): "HH-HL" | "LH-LL" | "Choppy" {
+  const hi = swings.highs.slice(-2);
+  const lo = swings.lows.slice(-2);
+  if (hi.length < 2 || lo.length < 2) return "Choppy";
+  const hhh = c[hi[1]].high > c[hi[0]].high;
+  const hhl = c[lo[1]].low > c[lo[0]].low;
+  const lhh = c[hi[1]].high < c[hi[0]].high;
+  const lll = c[lo[1]].low < c[lo[0]].low;
+  if (hhh && hhl) return "HH-HL";
+  if (lhh && lll) return "LH-LL";
+  return "Choppy";
+}
+
+// ---- Session ---------------------------------------------------------------
 
 function currentSession(): MarketAnalysis["sessionTag"] {
   const h = new Date().getUTCHours();
@@ -124,78 +237,54 @@ function currentSession(): MarketAnalysis["sessionTag"] {
   return "After Hours";
 }
 
-function clamp(n: number, lo: number, hi: number) {
-  return Math.max(lo, Math.min(hi, n));
-}
-function round(n: number, d: number) {
-  const p = Math.pow(10, d);
-  return Math.round(n * p) / p;
-}
-function fmt(n: number, d: number) {
-  return n.toFixed(d);
-}
+// ---- Utilities -------------------------------------------------------------
 
-export function analyzeMarket(c: Candle[], symbol: Symbol): MarketAnalysis {
-  const cfg = CONFIG.indicators;
-  const closes = c.map((k) => k.close);
-  const e20 = ema(closes, cfg.emaFast);
-  const e50 = ema(closes, cfg.emaMid);
-  const e200 = ema(closes, cfg.emaSlow);
-  const r = rsi(closes, cfg.rsiPeriod);
-  const m = macd(closes);
-  const a = atr(c, cfg.atrPeriod);
-  const adxRes = adx(c, cfg.adxPeriod);
-  const sr = findSupportResistance(c);
+function clamp(n: number, lo: number, hi: number) { return Math.max(lo, Math.min(hi, n)); }
+function round(n: number, d: number) { const p = Math.pow(10, d); return Math.round(n * p) / p; }
+function fmt(n: number, d: number) { return n.toFixed(d); }
+
+// ---- Market analysis -------------------------------------------------------
+
+export function analyzeMarket(c: Candle[], symbol: Symbol, tf: Timeframe = "15m"): MarketAnalysis {
+  const p = computeIndicators(c, symbol, tf);
   const i = c.length - 1;
-  const price = closes[i];
+  const price = p.closes[i];
 
   const trendScore = clamp(
-    ((price - e200[i]) / e200[i]) * 5000 +
-      (e20[i] > e50[i] ? 25 : -25) +
-      (e50[i] > e200[i] ? 25 : -25),
-    -100,
-    100,
+    ((price - p.e200[i]) / p.e200[i]) * 5000 +
+      (p.e20[i] > p.e50[i] ? 25 : -25) +
+      (p.e50[i] > p.e200[i] ? 25 : -25),
+    -100, 100,
   );
+  const structure = classifyStructure(c, p.swings);
   const trend: MarketAnalysis["trend"] =
-    trendScore > 25 ? "Bullish" : trendScore < -25 ? "Bearish" : "Sideways";
+    structure === "HH-HL" || trendScore > 25 ? "Bullish"
+      : structure === "LH-LL" || trendScore < -25 ? "Bearish"
+        : "Sideways";
 
   const macdState: MarketAnalysis["macdState"] =
-    m.hist[i] > 0 && m.hist[i - 1] <= 0
-      ? "Bullish Cross"
-      : m.hist[i] < 0 && m.hist[i - 1] >= 0
-        ? "Bearish Cross"
-        : m.hist[i] > 0
-          ? "Bullish"
-          : m.hist[i] < 0
-            ? "Bearish"
-            : "Flat";
+    p.m.hist[i] > 0 && p.m.hist[i - 1] <= 0 ? "Bullish Cross"
+      : p.m.hist[i] < 0 && p.m.hist[i - 1] >= 0 ? "Bearish Cross"
+        : p.m.hist[i] > 0 ? "Bullish"
+          : p.m.hist[i] < 0 ? "Bearish" : "Flat";
 
-  const atrPct = (a[i] / price) * 100;
+  const atrPct = (p.a[i] / price) * 100;
   const volatility: MarketAnalysis["volatility"] =
     atrPct < 0.08 ? "Low" : atrPct > 0.4 ? "High" : "Normal";
 
-  const recentRange =
-    Math.max(...c.slice(-30).map((k) => k.high)) -
-    Math.min(...c.slice(-30).map((k) => k.low));
-  const consolidation = recentRange / a[i] < 6;
-  const breakout = price > sr.resistance * 0.999 || price < sr.support * 1.001;
+  const recentRange = Math.max(...c.slice(-30).map((k) => k.high)) - Math.min(...c.slice(-30).map((k) => k.low));
+  const consolidation = recentRange / p.a[i] < 6;
+  const breakout = price > p.sr.resistance * 0.999 || price < p.sr.support * 1.001;
   const status: MarketAnalysis["status"] =
-    breakout && Math.abs(trendScore) > 30
-      ? "Breakout"
-      : consolidation
-        ? "Consolidating"
-        : Math.sign(trendScore) !== Math.sign(closes[i - 5] - closes[i - 20])
-          ? "Reversal Watch"
+    breakout && Math.abs(trendScore) > 30 ? "Breakout"
+      : consolidation ? "Consolidating"
+        : Math.sign(trendScore) !== Math.sign(p.closes[i - 5] - p.closes[i - 20]) ? "Reversal Watch"
           : "Trending";
 
   const momentum: MarketAnalysis["momentum"] =
-    Math.abs(m.hist[i]) > Math.abs(m.hist[i - 5]) * 1.2
-      ? "Strong"
-      : Math.abs(m.hist[i]) > Math.abs(m.hist[i - 5])
-        ? "Building"
-        : Math.abs(m.hist[i]) < Math.abs(m.hist[i - 5]) * 0.6
-          ? "Fading"
-          : "Weak";
+    Math.abs(p.m.hist[i]) > Math.abs(p.m.hist[i - 5]) * 1.2 ? "Strong"
+      : Math.abs(p.m.hist[i]) > Math.abs(p.m.hist[i - 5]) ? "Building"
+        : Math.abs(p.m.hist[i]) < Math.abs(p.m.hist[i - 5]) * 0.6 ? "Fading" : "Weak";
 
   const meta = SYMBOLS.find((s) => s.id === symbol)!;
   const spread = meta.group === "Forex" ? meta.vol * 0.15 : meta.vol * 0.05;
@@ -204,426 +293,387 @@ export function analyzeMarket(c: Candle[], symbol: Symbol): MarketAnalysis {
     Math.abs(trendScore) * 0.5 +
       (volatility === "Normal" ? 25 : volatility === "High" ? 10 : 0) +
       (momentum === "Strong" ? 25 : momentum === "Building" ? 15 : 0),
-    0,
-    100,
+    0, 100,
   );
 
   return {
-    trend,
-    trendScore,
-    momentum,
-    volatility,
-    atr: a[i],
-    rsi: r[i],
-    adx: adxRes.adx[i],
-    macdState,
-    support: sr.support,
-    resistance: sr.resistance,
-    status,
-    spread,
-    sessionTag: currentSession(),
-    signalStrength,
+    trend, trendScore, momentum, volatility,
+    atr: p.a[i], rsi: p.r[i], adx: p.adxRes.adx[i],
+    macdState, support: p.sr.support, resistance: p.sr.resistance,
+    status, spread, sessionTag: currentSession(), signalStrength, structure,
   };
 }
 
-// --- Contributor helpers -----------------------------------------------------
+// ---- Setup recognition -----------------------------------------------------
 
-// Directional contributor: returns a signed score in [-w, +w] and a detail string.
-function directional(
-  key: SignalKey,
-  bullStrength: number, // -1..+1 (positive = bullish, negative = bearish)
-  detail: string,
-): ScoreContribution {
+function detectSetup(
+  c: Candle[], p: IndicatorPack, structure: "HH-HL" | "LH-LL" | "Choppy",
+): { setup: SetupType; bias: "bull" | "bear" | "neutral"; confidence: number; detail: string } {
+  const i = c.length - 1;
+  const cur = c[i];
+  const price = p.closes[i];
+  const e20 = p.e20[i];
+  const e50 = p.e50[i];
+  const sr = p.sr;
+  const rvol = relativeVolume(c, CONFIG.indicators.relVolLookback);
+  const atrNow = p.a[i];
+  const prev = c[i - 1];
+  const prev2 = c[i - 2];
+
+  // Failed breakout: prior bar broke a level, current bar closed back inside.
+  if (prev.high > sr.resistance && cur.close < sr.resistance) {
+    return { setup: "Failed Breakout", bias: "bear", confidence: 0.85,
+      detail: `Prior bar tagged ${fmt(sr.resistance, 4)}, current closed back below — sellers reclaimed.` };
+  }
+  if (prev.low < sr.support && cur.close > sr.support) {
+    return { setup: "Failed Breakout", bias: "bull", confidence: 0.85,
+      detail: `Prior bar swept ${fmt(sr.support, 4)}, current reclaimed — buyers absorbed.` };
+  }
+
+  // Breakout: fresh close beyond level with rvol.
+  if (cur.close > sr.resistance && prev.close <= sr.resistance && rvol > 1.15) {
+    return { setup: "Breakout", bias: "bull", confidence: 0.9,
+      detail: `Close ${fmt(cur.close, 4)} above ${fmt(sr.resistance, 4)} on ${rvol.toFixed(2)}x RVOL.` };
+  }
+  if (cur.close < sr.support && prev.close >= sr.support && rvol > 1.15) {
+    return { setup: "Breakout", bias: "bear", confidence: 0.9,
+      detail: `Close ${fmt(cur.close, 4)} below ${fmt(sr.support, 4)} on ${rvol.toFixed(2)}x RVOL.` };
+  }
+
+  // Retest: price near recently broken level, small-range bar.
+  const brokeUpRecently = c.slice(-10, -1).some((k) => k.close > sr.resistance);
+  const brokeDnRecently = c.slice(-10, -1).some((k) => k.close < sr.support);
+  const nearRes = Math.abs(price - sr.resistance) / price < 0.0025;
+  const nearSup = Math.abs(price - sr.support) / price < 0.0025;
+  if (brokeUpRecently && nearRes && cur.close > sr.resistance * 0.999) {
+    return { setup: "Retest", bias: "bull", confidence: 0.8, detail: `Retesting broken resistance ${fmt(sr.resistance, 4)} from above.` };
+  }
+  if (brokeDnRecently && nearSup && cur.close < sr.support * 1.001) {
+    return { setup: "Retest", bias: "bear", confidence: 0.8, detail: `Retesting broken support ${fmt(sr.support, 4)} from below.` };
+  }
+
+  // Trend Pullback: uptrend + wick into EMA20 + reclaim close.
+  if (structure === "HH-HL" && cur.low <= e20 * 1.0015 && cur.close > e20) {
+    return { setup: "Trend Pullback", bias: "bull", confidence: 0.85,
+      detail: `Pullback into EMA20 in HH-HL structure, reclaimed on close.` };
+  }
+  if (structure === "LH-LL" && cur.high >= e20 * 0.9985 && cur.close < e20) {
+    return { setup: "Trend Pullback", bias: "bear", confidence: 0.85,
+      detail: `Rally into EMA20 in LH-LL structure, rejected on close.` };
+  }
+
+  // Trend Continuation: fresh minor swing high/low broken in trend direction.
+  const swingHi = p.swings.highs.length ? c[p.swings.highs[p.swings.highs.length - 1]].high : Infinity;
+  const swingLo = p.swings.lows.length ? c[p.swings.lows[p.swings.lows.length - 1]].low : -Infinity;
+  if (structure === "HH-HL" && cur.close > swingHi && price > e50) {
+    return { setup: "Trend Continuation", bias: "bull", confidence: 0.8, detail: `Cleared prior swing high ${fmt(swingHi, 4)} in uptrend.` };
+  }
+  if (structure === "LH-LL" && cur.close < swingLo && price < e50) {
+    return { setup: "Trend Continuation", bias: "bear", confidence: 0.8, detail: `Broke prior swing low ${fmt(swingLo, 4)} in downtrend.` };
+  }
+
+  // Momentum Expansion: expanding ATR bar + volume + directional close.
+  const bodyPct = Math.abs(cur.close - cur.open) / Math.max(atrNow, 1e-9);
+  if (bodyPct > 0.8 && rvol > 1.2) {
+    const bias = cur.close > cur.open ? "bull" : "bear";
+    return { setup: "Momentum Expansion", bias, confidence: 0.75,
+      detail: `Expansion bar ${(bodyPct * 100).toFixed(0)}% of ATR on ${rvol.toFixed(2)}x volume.` };
+  }
+
+  // Range: 30-bar range < 6 ATR AND at extreme.
+  const rng = Math.max(...c.slice(-30).map(k => k.high)) - Math.min(...c.slice(-30).map(k => k.low));
+  const inRange = atrNow > 0 && rng / atrNow < 6;
+  if (inRange && nearSup) {
+    // Range Reversal if divergence, else Range Bounce.
+    const div = rsiDivergence(p.closes, p.r, CONFIG.indicators.divergenceLookback);
+    if (div === "bullish") return { setup: "Range Reversal", bias: "bull", confidence: 0.75, detail: `Range low + bullish RSI divergence.` };
+    return { setup: "Range Bounce", bias: "bull", confidence: 0.65, detail: `Price at range low ${fmt(sr.support, 4)}.` };
+  }
+  if (inRange && nearRes) {
+    const div = rsiDivergence(p.closes, p.r, CONFIG.indicators.divergenceLookback);
+    if (div === "bearish") return { setup: "Range Reversal", bias: "bear", confidence: 0.75, detail: `Range high + bearish RSI divergence.` };
+    return { setup: "Range Bounce", bias: "bear", confidence: 0.65, detail: `Price at range high ${fmt(sr.resistance, 4)}.` };
+  }
+
+  // Mean Reversion: 2 std devs from BB middle + counter-move candle.
+  if (price > p.bb.upper[i] && cur.close < prev.close && cur.close < prev2.close) {
+    return { setup: "Mean Reversion", bias: "bear", confidence: 0.6, detail: `Rejected above upper Bollinger band.` };
+  }
+  if (price < p.bb.lower[i] && cur.close > prev.close && cur.close > prev2.close) {
+    return { setup: "Mean Reversion", bias: "bull", confidence: 0.6, detail: `Reclaimed above lower Bollinger band.` };
+  }
+
+  return { setup: "No Setup", bias: "neutral", confidence: 0, detail: "No named pattern detected on current bar." };
+}
+
+// ---- Contributor helpers ---------------------------------------------------
+
+function directional(key: SignalKey, bullStrength: number, detail: string): ScoreContribution {
   const w = CONFIG.weights[key];
   const score = clamp(bullStrength, -1, 1) * w;
   return {
-    key,
-    label: SIGNAL_LABELS[key],
-    score,
-    weight: w,
-    side: score > 0.05 ? "bull" : score < -0.05 ? "bear" : "neutral",
-    detail,
+    key, label: SIGNAL_LABELS[key], score, weight: w,
+    side: score > 0.05 ? "bull" : score < -0.05 ? "bear" : "neutral", detail,
   };
 }
-
-// Quality contributor: returns 0..w. Used only to scale the directional total.
 function quality(key: SignalKey, strength: number, detail: string): ScoreContribution {
   const w = CONFIG.weights[key];
-  const score = clamp(strength, 0, 1) * w;
   return {
-    key,
-    label: SIGNAL_LABELS[key],
-    score,
-    weight: w,
-    side: "neutral",
-    detail,
+    key, label: SIGNAL_LABELS[key], score: clamp(strength, 0, 1) * w,
+    weight: w, side: "neutral", detail,
   };
 }
 
-// --- Signal generator --------------------------------------------------------
+// ---- Signal generator ------------------------------------------------------
 
-export function generateSignal(c: Candle[], symbol: Symbol, tf: Timeframe): Signal {
-  const cfg = CONFIG.indicators;
+export interface GenerateOptions {
+  /** Higher-timeframe bias, if the caller already computed one. */
+  htfBias?: { trend: "Bullish" | "Bearish" | "Sideways"; strength: number };
+}
+
+export function generateSignal(
+  c: Candle[], symbol: Symbol, tf: Timeframe, opts: GenerateOptions = {},
+): Signal {
   const th = CONFIG.thresholds;
-  const closes = c.map((k) => k.close);
-  const e20 = ema(closes, cfg.emaFast);
-  const e50 = ema(closes, cfg.emaMid);
-  const e200 = ema(closes, cfg.emaSlow);
-  const r = rsi(closes, cfg.rsiPeriod);
-  const m = macd(closes);
-  const a = atr(c, cfg.atrPeriod);
-  const v = vwap(c);
-  const bb = bollinger(closes, cfg.bbPeriod, cfg.bbStdDev);
-  const adxRes = adx(c, cfg.adxPeriod);
-  const sr = findSupportResistance(c);
+  const p = computeIndicators(c, symbol, tf);
   const i = c.length - 1;
-  const price = closes[i];
+  const price = p.closes[i];
   const cur = c[i];
   const meta = SYMBOLS.find((s) => s.id === symbol)!;
-  const analysis = analyzeMarket(c, symbol);
+  const analysis = analyzeMarket(c, symbol, tf);
+  const structure = analysis.structure;
+
+  // ---- 0. Setup recognition (drives structural bias) ----------------------
+  const setupInfo = detectSetup(c, p, structure);
 
   const contribs: ScoreContribution[] = [];
 
-  // 1. Trend alignment (price vs EMA200).
-  const trendBias =
-    price > e200[i]
-      ? clamp((price - e200[i]) / e200[i] / 0.01, 0, 1)
-      : -clamp((e200[i] - price) / e200[i] / 0.01, 0, 1);
+  // 1. Market structure (HH-HL / LH-LL).
   contribs.push(
-    directional(
-      "trendAlignment",
-      trendBias,
-      `Price ${price > e200[i] ? "above" : "below"} EMA${cfg.emaSlow} by ${(
-        ((price - e200[i]) / e200[i]) *
-        100
-      ).toFixed(2)}%`,
-    ),
+    directional("marketStructure",
+      structure === "HH-HL" ? 1 : structure === "LH-LL" ? -1 : 0,
+      `Structure: ${structure}`),
   );
 
-  // 2. EMA slope (fast EMA rate of change).
-  const slope = normalizedSlope(e20, 10, price);
-  contribs.push(
-    directional(
-      "emaSlope",
-      clamp(slope / 0.05, -1, 1),
-      `EMA${cfg.emaFast} slope ${slope >= 0 ? "+" : ""}${slope.toFixed(3)}%/bar`,
-    ),
-  );
+  // 2. Trend alignment (price vs EMA200).
+  const trendBias = price > p.e200[i]
+    ? clamp((price - p.e200[i]) / p.e200[i] / 0.01, 0, 1)
+    : -clamp((p.e200[i] - price) / p.e200[i] / 0.01, 0, 1);
+  contribs.push(directional("trendAlignment", trendBias,
+    `Price ${price > p.e200[i] ? "above" : "below"} EMA200 by ${(((price - p.e200[i]) / p.e200[i]) * 100).toFixed(2)}%`));
 
-  // 3. EMA stacking.
-  const stackBull = e20[i] > e50[i] && e50[i] > e200[i];
-  const stackBear = e20[i] < e50[i] && e50[i] < e200[i];
-  contribs.push(
-    directional(
-      "emaStack",
-      stackBull ? 1 : stackBear ? -1 : e20[i] > e50[i] ? 0.35 : -0.35,
-      stackBull
-        ? "Bullish stack: 20 > 50 > 200"
-        : stackBear
-          ? "Bearish stack: 20 < 50 < 200"
-          : "EMAs not fully aligned",
-    ),
-  );
+  // 3. EMA slope.
+  const slope = normalizedSlope(p.e20, 10, price);
+  contribs.push(directional("emaSlope", clamp(slope / 0.05, -1, 1),
+    `EMA20 slope ${slope >= 0 ? "+" : ""}${slope.toFixed(3)}%/bar`));
 
-  // 4. RSI state (favor 50-70 for longs, 30-50 for shorts).
-  const rv = r[i];
-  const rsiBias =
-    rv > 70
-      ? -0.3
-      : rv > 55
-        ? clamp((rv - 55) / 15, 0, 1)
-        : rv < 30
-          ? 0.3
-          : rv < 45
-            ? -clamp((45 - rv) / 15, 0, 1)
-            : 0;
-  contribs.push(
-    directional(
-      "rsiState",
-      rsiBias,
-      `RSI ${rv.toFixed(0)} (${rv > 70 ? "overbought" : rv < 30 ? "oversold" : rv > 50 ? "bullish zone" : "bearish zone"})`,
-    ),
-  );
+  // 4. EMA stacking.
+  const stackBull = p.e20[i] > p.e50[i] && p.e50[i] > p.e200[i];
+  const stackBear = p.e20[i] < p.e50[i] && p.e50[i] < p.e200[i];
+  contribs.push(directional("emaStack",
+    stackBull ? 1 : stackBear ? -1 : p.e20[i] > p.e50[i] ? 0.35 : -0.35,
+    stackBull ? "Bullish stack" : stackBear ? "Bearish stack" : "EMAs mixed"));
 
-  // 5. RSI divergence.
-  const div = rsiDivergence(closes, r, cfg.divergenceLookback);
-  contribs.push(
-    directional(
-      "rsiDivergence",
-      div === "bullish" ? 1 : div === "bearish" ? -1 : 0,
-      div === "none" ? "No divergence detected" : `${div} divergence over last ${cfg.divergenceLookback} bars`,
-    ),
-  );
+  // 5. RSI state.
+  const rv = p.r[i];
+  const rsiBias = rv > 70 ? -0.3 : rv > 55 ? clamp((rv - 55) / 15, 0, 1)
+    : rv < 30 ? 0.3 : rv < 45 ? -clamp((45 - rv) / 15, 0, 1) : 0;
+  contribs.push(directional("rsiState", rsiBias, `RSI ${rv.toFixed(0)}`));
 
-  // 6. MACD histogram magnitude.
-  const histRefWindow = m.hist.slice(-50).map(Math.abs);
-  const histRef = Math.max(1e-9, Math.max(...histRefWindow));
-  contribs.push(
-    directional(
-      "macdHist",
-      clamp(m.hist[i] / histRef, -1, 1),
-      `MACD hist ${m.hist[i].toFixed(5)} (${m.hist[i] > 0 ? "bullish" : "bearish"})`,
-    ),
-  );
+  // 6. RSI divergence.
+  const div = rsiDivergence(p.closes, p.r, CONFIG.indicators.divergenceLookback);
+  contribs.push(directional("rsiDivergence",
+    div === "bullish" ? 1 : div === "bearish" ? -1 : 0,
+    div === "none" ? "No divergence" : `${div} divergence`));
 
-  // 7. MACD zero-line cross (fresh).
-  const cross =
-    m.hist[i] > 0 && m.hist[i - 1] <= 0
-      ? 1
-      : m.hist[i] < 0 && m.hist[i - 1] >= 0
-        ? -1
-        : 0;
-  contribs.push(
-    directional(
-      "macdCross",
-      cross,
-      cross === 0
-        ? "No fresh MACD cross"
-        : cross > 0
-          ? "Fresh bullish MACD cross"
-          : "Fresh bearish MACD cross",
-    ),
-  );
+  // 7. MACD histogram magnitude.
+  const histRef = Math.max(1e-9, Math.max(...p.m.hist.slice(-50).map(Math.abs)));
+  contribs.push(directional("macdHist", clamp(p.m.hist[i] / histRef, -1, 1),
+    `MACD hist ${p.m.hist[i].toFixed(5)}`));
 
-  // 8. ADX trend strength — scales *with* trend direction, penalizes weak trends.
-  const adxVal = adxRes.adx[i];
-  const diBias = adxRes.plusDi[i] - adxRes.minusDi[i];
-  const adxNorm = clamp((adxVal - 15) / 25, -0.4, 1); // <15 = drag, 40+ = full
-  contribs.push(
-    directional(
-      "adxStrength",
-      Math.sign(diBias || 0) * adxNorm,
-      `ADX ${adxVal.toFixed(0)} · +DI ${adxRes.plusDi[i].toFixed(0)} / -DI ${adxRes.minusDi[i].toFixed(0)}`,
-    ),
-  );
+  // 8. MACD zero-line cross (fresh).
+  const cross = p.m.hist[i] > 0 && p.m.hist[i - 1] <= 0 ? 1
+    : p.m.hist[i] < 0 && p.m.hist[i - 1] >= 0 ? -1 : 0;
+  contribs.push(directional("macdCross", cross,
+    cross === 0 ? "No fresh cross" : cross > 0 ? "Fresh bull cross" : "Fresh bear cross"));
 
-  // 9. ATR volatility regime (quality — normal is best).
-  const atrPct = (a[i] / price) * 100;
-  const volQuality =
-    atrPct < 0.05 ? 0.2 : atrPct < 0.08 ? 0.5 : atrPct < 0.4 ? 1.0 : atrPct < 0.7 ? 0.6 : 0.3;
-  contribs.push(
-    quality("atrVolatility", volQuality, `ATR ${atrPct.toFixed(2)}% of price · ${analysis.volatility}`),
-  );
+  // 9. ADX trend strength (modifier, no longer a hard gate).
+  const adxVal = p.adxRes.adx[i];
+  const diBias = p.adxRes.plusDi[i] - p.adxRes.minusDi[i];
+  const adxNorm = clamp((adxVal - 12) / 25, -0.3, 1);
+  contribs.push(directional("adxStrength", Math.sign(diBias || 0) * adxNorm,
+    `ADX ${adxVal.toFixed(0)} · +DI ${p.adxRes.plusDi[i].toFixed(0)}/-DI ${p.adxRes.minusDi[i].toFixed(0)}`));
 
-  // 10. VWAP location.
-  const vwapDiff = (price - v[i]) / v[i];
-  contribs.push(
-    directional(
-      "vwapLocation",
-      clamp(vwapDiff / 0.003, -1, 1),
-      `Price ${price > v[i] ? "above" : "below"} session VWAP`,
-    ),
-  );
+  // 10. ATR volatility regime (quality).
+  const atrPct = (p.a[i] / price) * 100;
+  const volQuality = atrPct < 0.05 ? 0.25 : atrPct < 0.08 ? 0.55 : atrPct < 0.5 ? 1.0 : atrPct < 0.8 ? 0.7 : 0.4;
+  contribs.push(quality("atrVolatility", volQuality, `ATR ${atrPct.toFixed(2)}% · ${analysis.volatility}`));
 
-  // 11. Volume expansion (current vs previous).
+  // 11. VWAP location.
+  const vwapDiff = (price - p.v[i]) / p.v[i];
+  contribs.push(directional("vwapLocation", clamp(vwapDiff / 0.003, -1, 1),
+    `Price ${price > p.v[i] ? "above" : "below"} VWAP`));
+
+  // 12. Volume expansion.
   const volExp = c[i - 1].volume ? cur.volume / c[i - 1].volume - 1 : 0;
   const bullCandle = cur.close > cur.open;
-  contribs.push(
-    directional(
-      "volumeExpansion",
-      clamp(volExp, -1, 1) * (bullCandle ? 1 : -1),
-      `Volume ${volExp >= 0 ? "+" : ""}${(volExp * 100).toFixed(0)}% vs previous bar`,
-    ),
-  );
+  contribs.push(directional("volumeExpansion", clamp(volExp, -1, 1) * (bullCandle ? 1 : -1),
+    `Volume ${volExp >= 0 ? "+" : ""}${(volExp * 100).toFixed(0)}%`));
 
-  // 12. Relative volume (RVOL vs 20-bar avg).
-  const rvol = relativeVolume(c, cfg.relVolLookback);
-  contribs.push(
-    directional(
-      "relativeVolume",
-      clamp((rvol - 1) / 1.5, -1, 1) * (bullCandle ? 1 : -1),
-      `RVOL ${rvol.toFixed(2)}x average`,
-    ),
-  );
+  // 13. Relative volume.
+  const rvol = relativeVolume(c, CONFIG.indicators.relVolLookback);
+  contribs.push(directional("relativeVolume", clamp((rvol - 1) / 1.5, -1, 1) * (bullCandle ? 1 : -1),
+    `RVOL ${rvol.toFixed(2)}x`));
 
-  // 13. Bollinger squeeze (quality — squeeze = potential energy).
-  const bwPct = percentileRank(bb.bandwidth, 100);
+  // 14. Bollinger squeeze (quality).
+  const bwPct = percentileRank(p.bb.bandwidth, 100);
   const squeezing = bwPct < th.squeezeBandwidthPct;
-  contribs.push(
-    quality(
-      "bollingerSqueeze",
-      squeezing ? 1 : 1 - Math.min(1, bwPct),
-      squeezing
-        ? `Squeeze: bandwidth in bottom ${(bwPct * 100).toFixed(0)}%`
-        : `Bandwidth in ${(bwPct * 100).toFixed(0)}th percentile`,
-    ),
-  );
+  contribs.push(quality("bollingerSqueeze",
+    squeezing ? 1 : 1 - Math.min(1, bwPct),
+    squeezing ? `Squeeze (${(bwPct * 100).toFixed(0)}%ile)` : `Bandwidth ${(bwPct * 100).toFixed(0)}%ile`));
 
-  // 14. Support/resistance proximity.
-  const distToSup = Math.abs(price - sr.support) / price;
-  const distToRes = Math.abs(price - sr.resistance) / price;
-  const nearSup = distToSup < 0.003;
-  const nearRes = distToRes < 0.003;
-  contribs.push(
-    directional(
-      "srProximity",
-      nearSup ? 0.8 : nearRes ? -0.8 : 0,
-      nearSup
-        ? `Near support ${fmt(sr.support, meta.digits)}`
-        : nearRes
-          ? `Near resistance ${fmt(sr.resistance, meta.digits)}`
-          : "Mid-range, no key level in play",
-    ),
-  );
+  // 15. S/R proximity (widened from 0.3% → 0.6% so it actually triggers).
+  const distSup = Math.abs(price - p.sr.support) / price;
+  const distRes = Math.abs(price - p.sr.resistance) / price;
+  const nearSup = distSup < 0.006;
+  const nearRes = distRes < 0.006;
+  contribs.push(directional("srProximity",
+    nearSup ? clamp(1 - distSup / 0.006, 0.3, 1) : nearRes ? -clamp(1 - distRes / 0.006, 0.3, 1) : 0,
+    nearSup ? `Near support ${fmt(p.sr.support, meta.digits)}`
+      : nearRes ? `Near resistance ${fmt(p.sr.resistance, meta.digits)}` : "Mid-range"));
 
-  // 15. Breakout quality (close beyond level with volume).
-  const brokeUp = price > sr.resistance && cur.close > cur.open && rvol > 1.1;
-  const brokeDown = price < sr.support && cur.close < cur.open && rvol > 1.1;
-  contribs.push(
-    directional(
-      "breakoutQuality",
-      brokeUp ? 1 : brokeDown ? -1 : 0,
-      brokeUp
-        ? "Bullish breakout with above-avg volume"
-        : brokeDown
-          ? "Bearish breakdown with above-avg volume"
-          : "No qualified breakout",
-    ),
-  );
+  // 16. Breakout quality (uses setup detection instead of same-bar-only).
+  const bqBull = setupInfo.setup === "Breakout" && setupInfo.bias === "bull";
+  const bqBear = setupInfo.setup === "Breakout" && setupInfo.bias === "bear";
+  contribs.push(directional("breakoutQuality",
+    bqBull ? 1 : bqBear ? -1 : 0,
+    bqBull ? "Bull breakout confirmed" : bqBear ? "Bear breakdown confirmed" : "No breakout"));
 
-  // 16. Pullback quality (touched EMA20 then rejected in trend direction).
-  const touchedFast = cur.low <= e20[i] * 1.001 && cur.close > e20[i];
-  const touchedFastBear = cur.high >= e20[i] * 0.999 && cur.close < e20[i];
-  const pullbackBull = analysis.trend === "Bullish" && touchedFast;
-  const pullbackBear = analysis.trend === "Bearish" && touchedFastBear;
-  contribs.push(
-    directional(
-      "pullbackQuality",
-      pullbackBull ? 1 : pullbackBear ? -1 : 0,
-      pullbackBull
-        ? `Bullish pullback rejected at EMA${cfg.emaFast}`
-        : pullbackBear
-          ? `Bearish pullback rejected at EMA${cfg.emaFast}`
-          : "No clean pullback",
-    ),
-  );
+  // 17. Pullback quality (Trend Pullback setup).
+  const pbBull = setupInfo.setup === "Trend Pullback" && setupInfo.bias === "bull";
+  const pbBear = setupInfo.setup === "Trend Pullback" && setupInfo.bias === "bear";
+  contribs.push(directional("pullbackQuality",
+    pbBull ? 1 : pbBear ? -1 : 0,
+    pbBull ? "Clean pullback in uptrend" : pbBear ? "Clean pullback in downtrend" : "No clean pullback"));
 
-  // 17. Session strength (quality).
+  // 18. Setup recognition (large weight — this is the pattern kernel).
+  contribs.push(directional("setupRecognition",
+    setupInfo.bias === "bull" ? setupInfo.confidence : setupInfo.bias === "bear" ? -setupInfo.confidence : 0,
+    `${setupInfo.setup}${setupInfo.setup !== "No Setup" ? " — " + setupInfo.detail : ""}`));
+
+  // 19. Session strength (quality).
   const sessMult = CONFIG.sessions[analysis.sessionTag] ?? 0.5;
-  contribs.push(
-    quality("sessionStrength", sessMult, `${analysis.sessionTag} session · liquidity ${(sessMult * 100).toFixed(0)}%`),
-  );
+  contribs.push(quality("sessionStrength", sessMult, `${analysis.sessionTag} session`));
 
-  // --- Aggregate ------------------------------------------------------------
+  // 20. Higher-timeframe alignment.
+  let htfContribValue = 0;
+  let htfDetail = "No HTF context";
+  if (opts.htfBias) {
+    const b = opts.htfBias;
+    const s = clamp(b.strength / 100, 0, 1);
+    htfContribValue = b.trend === "Bullish" ? s : b.trend === "Bearish" ? -s : 0;
+    htfDetail = `HTF ${b.trend.toLowerCase()} @ ${b.strength.toFixed(0)}% strength`;
+  }
+  contribs.push(directional("htfAlignment", htfContribValue, htfDetail));
 
-  let bullRaw = 0;
-  let bearRaw = 0;
-  let dirMax = 0;
-  let qualRaw = 0;
-  let qualMax = 0;
-
+  // ---- Aggregate to probability ------------------------------------------
+  let bullRaw = 0, bearRaw = 0, dirMax = 0, qualRaw = 0, qualMax = 0;
   for (const ctr of contribs) {
     if (QUALITY_SIGNALS.has(ctr.key)) {
-      qualRaw += ctr.score;
-      qualMax += ctr.weight;
+      qualRaw += ctr.score; qualMax += ctr.weight;
     } else {
       dirMax += ctr.weight;
       if (ctr.score > 0) bullRaw += ctr.score;
       else if (ctr.score < 0) bearRaw += -ctr.score;
     }
   }
-
   const bullScore = dirMax ? (bullRaw / dirMax) * 100 : 0;
   const bearScore = dirMax ? (bearRaw / dirMax) * 100 : 0;
   const qualityScore = qualMax ? (qualRaw / qualMax) * 100 : 50;
   const qualityMult = th.qualityFloor + (1 - th.qualityFloor) * (qualityScore / 100);
 
+  // Probability model:
+  //   dominant side raw = bullScore or bearScore (0..100)
+  //   opposing pressure reduces it by up to 40%
+  //   quality multiplier is now [0.7, 1.0] — a soft dampener
+  //   result clamped to 0..99.
+  const dominant: "BUY" | "SELL" = bullScore >= bearScore ? "BUY" : "SELL";
+  const dominantRaw = Math.max(bullScore, bearScore);
+  const opposingRaw = Math.min(bullScore, bearScore);
+  const opposingDrag = clamp(opposingRaw / 100, 0, 1) * 40;
+  const rawProb = Math.max(0, dominantRaw - opposingDrag) * qualityMult;
+  // Small boost when named setup aligns with dominant bias.
+  const setupAligned = setupInfo.setup !== "No Setup"
+    && ((dominant === "BUY" && setupInfo.bias === "bull") || (dominant === "SELL" && setupInfo.bias === "bear"));
+  const setupBoost = setupAligned ? 6 * setupInfo.confidence : 0;
+  const probability = Math.round(clamp(rawProb + setupBoost, 0, 99));
+  const bullProbability = Math.round(clamp(Math.max(0, bullScore - (bearScore / 100) * 40) * qualityMult
+    + (setupInfo.bias === "bull" ? 6 * setupInfo.confidence : 0), 0, 99));
+  const bearProbability = Math.round(clamp(Math.max(0, bearScore - (bullScore / 100) * 40) * qualityMult
+    + (setupInfo.bias === "bear" ? 6 * setupInfo.confidence : 0), 0, 99));
+
+  const grade = gradeFor(probability);
   const edge = Math.abs(bullScore - bearScore);
-  const dominant = bullScore >= bearScore ? "BUY" : "SELL";
-  const dominantScore = Math.max(bullScore, bearScore);
-  const rawConf = dominantScore * qualityMult;
-  const confidence = Math.round(clamp(rawConf, 0, 99));
+  const confidence = probability; // legacy alias
 
-  let side: Side = "NONE";
-  if (
-    confidence >= th.minConfidence &&
-    edge >= th.minEdgePct &&
-    adxVal >= th.adxTrendMin * 0.75 // soft floor — allow slightly weaker trend if other signals align
-  ) {
-    side = dominant as Side;
-  }
-
-  // --- Levels ---------------------------------------------------------------
-  const atrVal = a[i];
+  // ---- Levels ------------------------------------------------------------
+  const atrVal = p.a[i];
   const slDist = atrVal * th.slAtrMult;
   const tp1Dist = slDist * th.tp1RMult;
   const tp2Dist = slDist * th.tp2RMult;
+  let entry = price, sl = price, tp1 = price, tp2 = price;
 
-  let entry = price,
-    sl = price,
-    tp1 = price,
-    tp2 = price;
+  // Grade C or better = tradeable side; No = flat.
+  let side: Side = grade === "None" ? "NONE" : dominant;
+
   if (side === "BUY") {
-    entry = price;
-    sl = round(price - slDist, meta.digits);
-    tp1 = round(price + tp1Dist, meta.digits);
-    tp2 = round(price + tp2Dist, meta.digits);
+    entry = price; sl = round(price - slDist, meta.digits);
+    tp1 = round(price + tp1Dist, meta.digits); tp2 = round(price + tp2Dist, meta.digits);
   } else if (side === "SELL") {
-    entry = price;
-    sl = round(price + slDist, meta.digits);
-    tp1 = round(price - tp1Dist, meta.digits);
-    tp2 = round(price - tp2Dist, meta.digits);
+    entry = price; sl = round(price + slDist, meta.digits);
+    tp1 = round(price - tp1Dist, meta.digits); tp2 = round(price - tp2Dist, meta.digits);
   }
 
-  // Spread quality gate: if spread eats too much of the SL, reject.
-  let spreadPct = 0;
-  if (slDist > 0) spreadPct = (analysis.spread / slDist) * 100;
+  // Hard risk gate: spread eating stop.
+  const spreadPct = slDist > 0 ? (analysis.spread / slDist) * 100 : 0;
   const spreadPass = slDist > 0 ? spreadPct <= th.maxSpreadOverSlPct : true;
   if (side !== "NONE" && !spreadPass) side = "NONE";
 
-  // --- Diagnostic filter evaluation ----------------------------------------
-  // Evaluated for EVERY tick, whether or not the signal fires, so the UI can
-  // show exactly what's blocking a trade and how close each gate is.
-  const requiredAdxSoft = th.adxTrendMin * 0.75;
+  // ---- Diagnostics -------------------------------------------------------
   const filters: FilterCheck[] = [
     {
-      key: "confidence",
-      label: "Confidence ≥ threshold",
-      pass: confidence >= th.minConfidence,
-      actual: confidence,
-      required: th.minConfidence,
-      unit: "%",
-      progress: clamp(confidence / th.minConfidence, 0, 1),
-      detail: `Weighted confidence ${confidence}% vs required ${th.minConfidence}%.`,
+      key: "probability", label: "Probability ≥ grade C floor",
+      pass: probability >= th.gradeC, actual: probability, required: th.gradeC, unit: "%",
+      progress: clamp(probability / th.gradeC, 0, 1),
+      detail: `Weighted probability ${probability}% vs C-grade floor ${th.gradeC}%.`,
     },
     {
-      key: "edge",
-      label: "Directional edge ≥ minimum",
-      pass: edge >= th.minEdgePct,
-      actual: +edge.toFixed(1),
-      required: th.minEdgePct,
-      unit: "%",
-      progress: clamp(edge / th.minEdgePct, 0, 1),
-      detail: `Bull ${bullScore.toFixed(0)} vs Bear ${bearScore.toFixed(0)} → edge ${edge.toFixed(0)}% (need ${th.minEdgePct}%).`,
+      key: "setup", label: "Named setup detected",
+      pass: setupInfo.setup !== "No Setup",
+      actual: setupInfo.setup !== "No Setup" ? 1 : 0, required: 1,
+      progress: setupInfo.setup !== "No Setup" ? 1 : 0.2,
+      detail: setupInfo.setup === "No Setup"
+        ? "No pattern recognized — waiting for pullback/breakout/retest/reversal."
+        : `${setupInfo.setup}: ${setupInfo.detail}`,
     },
     {
-      key: "adx",
-      label: "Trend strength (ADX)",
-      pass: adxVal >= requiredAdxSoft,
-      actual: +adxVal.toFixed(1),
-      required: +requiredAdxSoft.toFixed(1),
-      progress: clamp(adxVal / requiredAdxSoft, 0, 1),
-      detail: `ADX ${adxVal.toFixed(0)} vs soft floor ${requiredAdxSoft.toFixed(0)} (hard trend ≥ ${th.adxTrendMin}).`,
-    },
-    {
-      key: "spread",
-      label: "Spread cost vs SL",
-      pass: spreadPass,
-      actual: +spreadPct.toFixed(1),
-      required: th.maxSpreadOverSlPct,
-      unit: "%",
+      key: "spread", label: "Spread cost vs SL",
+      pass: spreadPass, actual: +spreadPct.toFixed(1), required: th.maxSpreadOverSlPct, unit: "%",
       progress: spreadPct <= th.maxSpreadOverSlPct ? 1 : clamp(th.maxSpreadOverSlPct / Math.max(spreadPct, 0.01), 0, 1),
-      detail: `Spread is ${spreadPct.toFixed(1)}% of the ${th.slAtrMult}×ATR stop (max allowed ${th.maxSpreadOverSlPct}%).`,
+      detail: `Spread ${spreadPct.toFixed(1)}% of ${th.slAtrMult}×ATR stop (max ${th.maxSpreadOverSlPct}%).`,
     },
     {
-      key: "quality",
-      label: "Setup quality floor",
-      pass: qualityScore >= th.qualityFloor * 100,
-      actual: +qualityScore.toFixed(0),
-      required: +(th.qualityFloor * 100).toFixed(0),
-      unit: "%",
+      key: "adx", label: "Trend strength (soft)",
+      pass: adxVal >= th.adxTrendMin, actual: +adxVal.toFixed(1), required: th.adxTrendMin,
+      progress: clamp(adxVal / th.adxTrendMin, 0, 1),
+      detail: `ADX ${adxVal.toFixed(0)} (${adxVal >= th.adxTrendMin ? "trending" : "weak — trims probability, does not veto"}).`,
+    },
+    {
+      key: "quality", label: "Quality (session / vol / squeeze)",
+      pass: qualityScore >= th.qualityFloor * 100, actual: +qualityScore.toFixed(0),
+      required: +(th.qualityFloor * 100).toFixed(0), unit: "%",
       progress: clamp(qualityScore / (th.qualityFloor * 100), 0, 1),
-      detail: `Session/volatility/squeeze quality ${qualityScore.toFixed(0)}% (floor ${(th.qualityFloor * 100).toFixed(0)}%).`,
+      detail: `Quality ${qualityScore.toFixed(0)}% (floor ${(th.qualityFloor * 100).toFixed(0)}% — modifier only).`,
     },
   ];
 
@@ -631,110 +681,103 @@ export function generateSignal(c: Candle[], symbol: Symbol, tf: Timeframe): Sign
   const blockingFilter = failed[0] ?? null;
   const closestToPassing = [...failed].sort((a, b) => b.progress - a.progress).slice(0, 3);
 
-  const rejectionReason = side !== "NONE"
-    ? ""
-    : failed.length === 0
-      ? `Setup is technically valid but was suppressed after level checks — verify entry, SL and spread.`
-      : `Blocked by ${blockingFilter!.label}: ${blockingFilter!.detail}` +
-        (failed.length > 1
-          ? ` Also failing: ${failed.slice(1).map((f) => f.label).join(", ")}.`
-          : "");
+  // Top boosters/reducers — biggest signed contributors to dominant side.
+  const signed = contribs.map((c) => ({
+    label: c.label,
+    delta: dominant === "BUY" ? c.score : -c.score,
+  }));
+  const topBoosters = [...signed].filter((x) => x.delta > 0).sort((a, b) => b.delta - a.delta).slice(0, 3)
+    .map(x => ({ label: x.label, delta: +x.delta.toFixed(1) }));
+  const topReducers = [...signed].filter((x) => x.delta < 0).sort((a, b) => a.delta - b.delta).slice(0, 3)
+    .map(x => ({ label: x.label, delta: +x.delta.toFixed(1) }));
+
+  let rejectionReason = "";
+  if (side === "NONE") {
+    if (!spreadPass) rejectionReason = `Spread ${spreadPct.toFixed(1)}% of stop — trading cost too high.`;
+    else if (setupInfo.setup === "No Setup" && probability < th.gradeC) {
+      rejectionReason = `No named setup and probability ${probability}% is below C-grade floor (${th.gradeC}%). Structure ${structure}, ADX ${adxVal.toFixed(0)}.`;
+    } else if (probability < th.gradeC) {
+      rejectionReason = `${setupInfo.setup} detected but bull ${bullScore.toFixed(0)}% vs bear ${bearScore.toFixed(0)}% keeps probability at ${probability}% (need ${th.gradeC}%).`;
+    } else {
+      rejectionReason = `Blocked by ${blockingFilter?.label ?? "risk gate"}.`;
+    }
+  }
+
+  const gap = Math.max(0, th.gradeC - probability);
+  const needToPass = side !== "NONE"
+    ? `Already tradeable at grade ${grade}. Next tier at ${grade === "C" ? th.gradeB : grade === "B" ? th.gradeA : th.gradeAPlus}%.`
+    : gap === 0
+      ? `Fix the blocking gate: ${blockingFilter?.label ?? "spread/data"}.`
+      : `Need +${gap}% probability. Biggest reducer: ${topReducers[0]?.label ?? "opposing pressure"}.`;
 
   const diagnostics: SignalDiagnostics = {
     currentConfidence: confidence,
-    requiredConfidence: th.minConfidence,
+    requiredConfidence: th.gradeC,
     bullScore: +bullScore.toFixed(1),
     bearScore: +bearScore.toFixed(1),
     qualityScore: +qualityScore.toFixed(1),
     edge: +edge.toFixed(1),
-    requiredEdge: th.minEdgePct,
+    requiredEdge: 0, // no longer a gate
     adxValue: +adxVal.toFixed(1),
-    requiredAdx: +requiredAdxSoft.toFixed(1),
+    requiredAdx: th.adxTrendMin,
     riskRewardEstimate: th.tp1RMult,
     qualityMultiplier: +qualityMult.toFixed(3),
-    dominantSide: dominant as "BUY" | "SELL",
-    filters,
-    blockingFilter,
-    closestToPassing,
-    rejectionReason,
+    dominantSide: dominant,
+    filters, blockingFilter, closestToPassing, rejectionReason,
+    probability, bullProbability, bearProbability, grade,
+    setup: setupInfo.setup, topBoosters, topReducers, needToPass,
   };
 
-  // --- Explanation ----------------------------------------------------------
+  // ---- Expected metrics --------------------------------------------------
+  const barSecondsMap: Record<Timeframe, number> = { "1m": 60, "5m": 300, "15m": 900, "1h": 3600, "4h": 14400 };
+  const expectedHoldingBars = Math.round(th.tp1RMult * 4);
+  const holdSecs = expectedHoldingBars * barSecondsMap[tf];
+  const expectedHoldingLabel = holdSecs < 3600 ? `${Math.round(holdSecs / 60)} min`
+    : holdSecs < 86400 ? `${(holdSecs / 3600).toFixed(1)} h` : `${(holdSecs / 86400).toFixed(1)} d`;
+  const expectedTrendStrength: Signal["expectedTrendStrength"] =
+    adxVal < 15 ? "Weak" : adxVal < 22 ? "Moderate" : adxVal < 35 ? "Strong" : "Very Strong";
+
+  // ---- Narratives --------------------------------------------------------
   const reasonsList = contribs
-    .filter((ctr) => (side === "BUY" ? ctr.score > 0 : side === "SELL" ? ctr.score < 0 : Math.abs(ctr.score) > 0))
+    .filter((ctr) => (dominant === "BUY" ? ctr.score > 0 : ctr.score < 0))
     .sort((a, b) => Math.abs(b.score) - Math.abs(a.score))
-    .slice(0, 6)
-    .map((ctr) => ctr.label);
+    .slice(0, 6).map((ctr) => ctr.label);
 
-  const disagreements = contribs
-    .filter((ctr) =>
-      side === "BUY" ? ctr.score < -0.5 : side === "SELL" ? ctr.score > 0.5 : false,
-    )
-    .map((ctr) => `${ctr.label} (${ctr.detail})`);
+  const strength: Signal["strength"] = probability > 78 ? "Strong" : probability > 65 ? "Moderate" : "Weak";
 
-  const strength: Signal["strength"] =
-    confidence > 82 ? "Strong" : confidence > 68 ? "Moderate" : "Weak";
+  const explanation = side === "NONE"
+    ? `No tradeable setup on ${symbol} ${tf} (grade ${grade}). ${rejectionReason}`
+    : `${symbol} ${tf} · ${grade} ${dominant} · ${probability}% probability. Setup: ${setupInfo.setup}. Structure ${structure}, ADX ${adxVal.toFixed(0)}. Target 1:${th.tp1RMult}R first, 1:${th.tp2RMult}R runner.`;
 
-  const explanation =
-    side === "NONE"
-      ? `No high-quality setup on ${symbol} ${tf}. ${rejectionReason}`
-      : `${symbol} ${tf}: ${dominant} bias at ${confidence}% confidence. Bull ${bullScore.toFixed(
-          0,
-        )} / Bear ${bearScore.toFixed(0)}, quality ${qualityScore.toFixed(
-          0,
-        )}%, ADX ${adxVal.toFixed(0)}. Structured ${dominant === "BUY" ? "long" : "short"} with ${th.tp1RMult}R first target and ${th.tp2RMult}R runner.`;
+  const aiSummary = side === "NONE"
+    ? `Stand aside. ${setupInfo.setup === "No Setup" ? "No pattern present." : setupInfo.setup + " forming but probability " + probability + "% below C-grade floor."} Structure ${structure}, trend ${analysis.trend.toLowerCase()}, momentum ${analysis.momentum.toLowerCase()}.`
+    : `${grade}-grade ${dominant === "BUY" ? "long" : "short"}: ${setupInfo.setup} in ${structure} structure. Driven by ${reasonsList.slice(0, 3).join(", ")}. ${topReducers.length ? "Watch: " + topReducers.slice(0, 2).map(r => r.label).join(", ") + "." : "No major disagreement."} Risk ${th.slAtrMult}×ATR, targets 1:${th.tp1RMult}/1:${th.tp2RMult}.`;
 
-
-  const aiSummary =
-    side === "NONE"
-      ? `Stand aside. Market is ${analysis.trend.toLowerCase()} with ${analysis.momentum.toLowerCase()} momentum in a ${analysis.status.toLowerCase()} state. Neither side has an edge worth committing capital to right now.`
-      : `${dominant === "BUY" ? "Long" : "Short"} setup driven by ${reasonsList.slice(0, 3).join(", ")}. Regime: ${analysis.trend.toLowerCase()} / ${analysis.status.toLowerCase()}. ${
-          disagreements.length
-            ? `Watch outs: ${disagreements.slice(0, 2).join("; ")}.`
-            : "No major indicator disagreements."
-        } Risk ${th.slAtrMult}×ATR to stop, target 1:${th.tp1RMult} first / 1:${th.tp2RMult} runner.`;
-
-  // Legacy checklist: repurpose top 9 contributors as pass/fail chips.
   const checks = contribs.slice(0, 9).map((ctr) => ({
     label: ctr.label,
-    pass: side === "BUY" ? ctr.score > 0 : side === "SELL" ? ctr.score < 0 : ctr.score !== 0,
+    pass: dominant === "BUY" ? ctr.score > 0 : ctr.score < 0,
   }));
 
   return {
     id: `${symbol}-${tf}-${cur.time}`,
-    symbol,
-    timeframe: tf,
-    side,
-    entry,
-    stopLoss: sl,
-    takeProfit1: tp1,
-    takeProfit2: tp2,
+    symbol, timeframe: tf, side,
+    entry, stopLoss: sl, takeProfit1: tp1, takeProfit2: tp2,
     riskReward: th.tp1RMult,
-    confidence,
-    bullScore: Math.round(bullScore),
-    bearScore: Math.round(bearScore),
+    confidence, bullScore: Math.round(bullScore), bearScore: Math.round(bearScore),
     qualityScore: Math.round(qualityScore),
-    trend: analysis.trend,
-    strength,
-    reasons: reasonsList,
-    explanation,
-    aiSummary,
-    scoreBreakdown: contribs,
-    diagnostics,
-    checks,
-    createdAt: Date.now(),
-    atr: atrVal,
-    rsi: r[i],
-    spread: analysis.spread,
+    trend: analysis.trend, strength,
+    reasons: reasonsList, explanation, aiSummary,
+    scoreBreakdown: contribs, diagnostics, checks,
+    createdAt: Date.now(), atr: atrVal, rsi: p.r[i], spread: analysis.spread,
+    probability, grade, setup: setupInfo.setup,
+    expectedMove: +(tp1Dist).toFixed(meta.digits),
+    expectedHoldingBars, expectedHoldingLabel, expectedTrendStrength,
+    expectedRiskReward: th.tp1RMult,
   };
 }
 
 export function positionSize(
-  accountBalance: number,
-  riskPct: number,
-  entry: number,
-  sl: number,
-  pipValue = 10,
+  accountBalance: number, riskPct: number, entry: number, sl: number, pipValue = 10,
 ) {
   const riskAmount = accountBalance * (riskPct / 100);
   const stopDist = Math.abs(entry - sl);

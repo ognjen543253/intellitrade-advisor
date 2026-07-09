@@ -1,26 +1,51 @@
-// IntelliTrade Quant Engine — central configuration.
-// Every threshold, indicator period, and signal weight lives here.
-// v1 covers Phase 1 (weighted scoring) + Phase 6 (AI explanation).
-// Later phases (regime, adaptive risk, MTF gate) will read from the same file.
+// IntelliTrade Quant Engine — probability-based configuration.
+// The engine outputs a probability (0..100) and a grade (A+..C / None).
+// There are NO correlated hard gates on confidence — indicators reduce
+// probability, they do not veto trades. Only genuine risk gates (spread,
+// data sufficiency, absent setup at very low probability) are hard.
 
 export type SignalKey =
+  // Structure & trend (evaluated FIRST)
+  | "marketStructure"
   | "trendAlignment"
   | "emaSlope"
   | "emaStack"
+  // Momentum
   | "rsiState"
   | "rsiDivergence"
   | "macdHist"
   | "macdCross"
+  // Trend strength / directional pressure
   | "adxStrength"
-  | "atrVolatility"
+  // Liquidity
   | "vwapLocation"
   | "volumeExpansion"
   | "relativeVolume"
+  // Volatility regime (quality)
+  | "atrVolatility"
   | "bollingerSqueeze"
+  // Location & setup quality
   | "srProximity"
   | "breakoutQuality"
   | "pullbackQuality"
-  | "sessionStrength";
+  | "setupRecognition"
+  // Context
+  | "sessionStrength"
+  | "htfAlignment";
+
+export type SetupType =
+  | "Trend Pullback"
+  | "Trend Continuation"
+  | "Breakout"
+  | "Retest"
+  | "Failed Breakout"
+  | "Momentum Expansion"
+  | "Range Reversal"
+  | "Range Bounce"
+  | "Mean Reversion"
+  | "No Setup";
+
+export type Grade = "A+" | "A" | "B" | "C" | "None";
 
 export interface QuantConfig {
   indicators: {
@@ -37,34 +62,32 @@ export interface QuantConfig {
     macdSignal: number;
     relVolLookback: number;
     divergenceLookback: number;
+    swingLookback: number;
   };
-  // Per-signal weight. Directional signals score −weight (bear) to +weight (bull).
-  // Neutral quality signals (volatility, session, squeeze) score 0..weight and
-  // scale the directional total via `qualityFloor`.
   weights: Record<SignalKey, number>;
   thresholds: {
-    // Minimum normalized confidence to fire a directional signal (0..100).
-    minConfidence: number;
-    // Minimum |bullScore − bearScore| as a % of the max possible directional
-    // score. Below this, the sides are too balanced → NONE.
-    minEdgePct: number;
-    // Quality signals scale directional score. `qualityFloor` is the minimum
-    // multiplier (e.g. 0.5 = a poor session still lets a great setup through
-    // at half strength).
+    // Probability -> grade thresholds. Below `gradeC` = No Trade.
+    gradeAPlus: number;
+    gradeA: number;
+    gradeB: number;
+    gradeC: number;
+    // Quality scales probability. Floor is intentionally forgiving — a poor
+    // session shouldn't kill an otherwise excellent setup.
     qualityFloor: number;
-    // Risk/reward baseline (SL and TP are ATR-scaled; TP1 = 2R by default).
+    // Risk model.
     slAtrMult: number;
     tp1RMult: number;
     tp2RMult: number;
-    // Reject setups whose est. spread exceeds this fraction of the SL distance.
+    // Only hard risk gate on spread.
     maxSpreadOverSlPct: number;
-    // ADX below this = no real trend; trend-alignment signals get halved.
+    // ADX is a modifier now, not a filter. Below this it merely trims prob.
     adxTrendMin: number;
-    // Bollinger bandwidth percentile (0..1) below which we tag "Squeeze".
+    // Squeeze detection.
     squeezeBandwidthPct: number;
+    // Structure — swing break detection.
+    structureLookback: number;
   };
   sessions: {
-    // Session multiplier applied to quality (0..1). Overlap = best liquidity.
     Asia: number;
     London: number;
     Overlap: number;
@@ -75,6 +98,8 @@ export interface QuantConfig {
     defaultRiskPct: 1 | 2;
     minRiskReward: number;
   };
+  // Higher-timeframe map used by MTF continuation logic.
+  htfMap: Record<string, string | null>;
 }
 
 export const CONFIG: QuantConfig = {
@@ -92,56 +117,73 @@ export const CONFIG: QuantConfig = {
     macdSignal: 9,
     relVolLookback: 20,
     divergenceLookback: 14,
+    swingLookback: 5,
   },
+  // STRUCTURE-FIRST weighting: structure/trend outweigh momentum outweigh
+  // liquidity outweigh indicator confirmations. Setup recognition is the
+  // single largest contributor when a valid pattern is present.
   weights: {
-    trendAlignment: 12,
-    emaSlope: 6,
-    emaStack: 8,
-    rsiState: 6,
-    rsiDivergence: 8,
-    macdHist: 6,
-    macdCross: 8,
-    adxStrength: 8,
+    marketStructure: 14,
+    trendAlignment: 10,
+    emaSlope: 5,
+    emaStack: 6,
+    rsiState: 5,
+    rsiDivergence: 7,
+    macdHist: 5,
+    macdCross: 6,
+    adxStrength: 7,
     atrVolatility: 5,
-    vwapLocation: 5,
-    volumeExpansion: 5,
+    vwapLocation: 4,
+    volumeExpansion: 4,
     relativeVolume: 5,
-    bollingerSqueeze: 4,
-    srProximity: 7,
-    breakoutQuality: 8,
-    pullbackQuality: 8,
-    sessionStrength: 4,
+    bollingerSqueeze: 3,
+    srProximity: 6,
+    breakoutQuality: 7,
+    pullbackQuality: 7,
+    setupRecognition: 15,
+    sessionStrength: 3,
+    htfAlignment: 8,
   },
   thresholds: {
-    minConfidence: 62,
-    minEdgePct: 18,
-    qualityFloor: 0.55,
+    gradeAPlus: 82,
+    gradeA: 72,
+    gradeB: 62,
+    gradeC: 55,
+    qualityFloor: 0.7,
     slAtrMult: 1.5,
     tp1RMult: 2,
     tp2RMult: 3.2,
-    maxSpreadOverSlPct: 25,
-    adxTrendMin: 20,
+    maxSpreadOverSlPct: 30,
+    adxTrendMin: 18,
     squeezeBandwidthPct: 0.2,
+    structureLookback: 20,
   },
   sessions: {
-    Asia: 0.75,
+    Asia: 0.8,
     London: 0.95,
     Overlap: 1.0,
-    "New York": 0.9,
-    "After Hours": 0.5,
+    "New York": 0.95,
+    "After Hours": 0.6,
   },
   risk: {
     defaultRiskPct: 1,
     minRiskReward: 2,
   },
+  htfMap: {
+    "1m": "15m",
+    "5m": "1h",
+    "15m": "4h",
+    "1h": "4h",
+    "4h": null,
+  },
 };
 
-// Human-readable labels for the AI explanation UI.
 export const SIGNAL_LABELS: Record<SignalKey, string> = {
-  trendAlignment: "HTF trend alignment",
+  marketStructure: "Market structure (swing HH/HL)",
+  trendAlignment: "Trend alignment (price vs EMA200)",
   emaSlope: "EMA slope",
-  emaStack: "EMA stacking (20/50/200)",
-  rsiState: "RSI momentum state",
+  emaStack: "EMA stack 20/50/200",
+  rsiState: "RSI state",
   rsiDivergence: "RSI divergence",
   macdHist: "MACD histogram",
   macdCross: "MACD zero-line cross",
@@ -151,15 +193,25 @@ export const SIGNAL_LABELS: Record<SignalKey, string> = {
   volumeExpansion: "Volume expansion",
   relativeVolume: "Relative volume (RVOL)",
   bollingerSqueeze: "Bollinger squeeze",
-  srProximity: "Support / resistance proximity",
+  srProximity: "S/R proximity",
   breakoutQuality: "Breakout quality",
   pullbackQuality: "Pullback quality",
+  setupRecognition: "Setup pattern",
   sessionStrength: "Session liquidity",
+  htfAlignment: "Higher-timeframe alignment",
 };
 
-// Which signals are neutral quality gates (0..w) vs directional (-w..+w).
 export const QUALITY_SIGNALS: ReadonlySet<SignalKey> = new Set([
   "atrVolatility",
   "bollingerSqueeze",
   "sessionStrength",
 ]);
+
+export function gradeFor(probability: number): Grade {
+  const t = CONFIG.thresholds;
+  if (probability >= t.gradeAPlus) return "A+";
+  if (probability >= t.gradeA) return "A";
+  if (probability >= t.gradeB) return "B";
+  if (probability >= t.gradeC) return "C";
+  return "None";
+}

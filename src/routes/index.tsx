@@ -340,6 +340,8 @@ function TradingDashboard() {
               />
             </div>
 
+            <DiagnosticsPanel signal={signal} symbol={symbol} timeframe={timeframe} />
+
             <BestSetupCard
               scan={scan}
               activeTf={timeframe}

@@ -35,6 +35,40 @@ export interface ScoreContribution {
   detail: string;
 }
 
+export interface FilterCheck {
+  key: string;
+  label: string;
+  pass: boolean;
+  actual: number;
+  required: number;
+  unit?: string;
+  /** 0..1 — how close to passing (1 = passing, 0 = far). */
+  progress: number;
+  detail: string;
+}
+
+export interface SignalDiagnostics {
+  currentConfidence: number;
+  requiredConfidence: number;
+  bullScore: number;
+  bearScore: number;
+  qualityScore: number;
+  edge: number;
+  requiredEdge: number;
+  adxValue: number;
+  requiredAdx: number;
+  riskRewardEstimate: number;
+  qualityMultiplier: number;
+  dominantSide: "BUY" | "SELL";
+  filters: FilterCheck[];
+  /** First filter (in eval order) that failed. */
+  blockingFilter: FilterCheck | null;
+  /** Failed filters ranked by proximity to passing. */
+  closestToPassing: FilterCheck[];
+  /** Plain-English reason. Empty when the signal fires. */
+  rejectionReason: string;
+}
+
 export interface Signal {
   id: string;
   symbol: Symbol;
@@ -55,6 +89,7 @@ export interface Signal {
   explanation: string;
   aiSummary: string;
   scoreBreakdown: ScoreContribution[];
+  diagnostics: SignalDiagnostics;
   // Legacy — kept so SignalCard's checklist still renders.
   checks: { label: string; pass: boolean }[];
   createdAt: number;

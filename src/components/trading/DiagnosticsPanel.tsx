@@ -1,8 +1,7 @@
-import { useSyncExternalStore } from "react";
 import type { Signal } from "@/lib/trading/signals";
 import type { Symbol, Timeframe } from "@/lib/trading/market-data";
 import {
-  subscribeDiagnostics, getDiagnosticsVersion, getBucket, getAllRejections, formatTimeAgo,
+  getBucket, getAllRejections, formatTimeAgo,
 } from "@/lib/trading/diagnostics-store";
 import { Pill } from "./Stat";
 import { cn } from "@/lib/utils";
@@ -15,8 +14,6 @@ export function DiagnosticsPanel({
   symbol: Symbol;
   timeframe: Timeframe;
 }) {
-  // Re-render when diagnostics store changes.
-  useSyncExternalStore(subscribeDiagnostics, getDiagnosticsVersion, () => 0);
   const bucket = getBucket(symbol, timeframe);
   const rejections = getAllRejections();
   const d = signal.diagnostics;

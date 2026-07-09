@@ -165,7 +165,7 @@ function TradingDashboard() {
     };
     const priceId = setInterval(tickPrice, 6000);
     return () => { cancelled = true; clearInterval(candleId); clearInterval(priceId); };
-  }, [symbol, timeframe, fetchCandles, fetchScan, fetchPrice]);
+  }, [symbol, timeframe]);
 
 
 
@@ -190,11 +190,14 @@ function TradingDashboard() {
   // Record every evaluation (fired or rejected) into the diagnostics store.
   // Must run before any early return to keep hook order stable.
   useEffect(() => {
-    if (ready) {
-      const sig = generateSignal(candles, symbol, timeframe);
-      recordSignal(sig);
-    }
-    for (const row of scan) if (row.signal) recordSignal(row.signal);
+    const id = window.setTimeout(() => {
+      if (ready) {
+        const sig = generateSignal(candles, symbol, timeframe);
+        recordSignal(sig);
+      }
+      for (const row of scan) if (row.signal) recordSignal(row.signal);
+    }, 0);
+    return () => window.clearTimeout(id);
   }, [ready, candles, symbol, timeframe, scan]);
 
   if (!ready) {

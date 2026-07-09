@@ -9,6 +9,9 @@ interface Props {
   onLogTrade?: (signal: Signal) => void;
 }
 
+const gradeTone = (g: Signal["grade"]) =>
+  g === "A+" ? "bull" : g === "A" ? "bull" : g === "B" ? "info" : g === "C" ? "warning" : "muted";
+
 export function SignalCard({ signal, digits, onLogTrade }: Props) {
   if (signal.side === "NONE") {
     return (
@@ -17,7 +20,14 @@ export function SignalCard({ signal, digits, onLogTrade }: Props) {
           <Clock className="h-4 w-4 text-muted-foreground" />
           <h3 className="text-sm font-semibold tracking-tight">No Trade Setup</h3>
           <Pill tone="muted">Patience</Pill>
+          <Pill tone={gradeTone(signal.grade)}>{signal.grade}</Pill>
+          <span className="ml-auto font-mono-tab text-xs text-muted-foreground">
+            {signal.probability}% prob
+          </span>
         </div>
+        <p className="mt-2 text-[11px] text-muted-foreground">
+          Setup: <span className="text-foreground/80 font-medium">{signal.setup}</span>
+        </p>
         <p className="mt-3 text-sm leading-relaxed text-muted-foreground">{signal.explanation}</p>
         <div className="mt-4 grid grid-cols-3 gap-2">
           {signal.checks.slice(0, 9).map((c) => (
@@ -53,15 +63,19 @@ export function SignalCard({ signal, digits, onLogTrade }: Props) {
             </div>
             <span className="font-mono-tab text-sm font-semibold">{signal.symbol}</span>
             <Pill tone="muted">{signal.timeframe}</Pill>
+            <Pill tone={gradeTone(signal.grade)}>Grade {signal.grade}</Pill>
             <Pill tone={signal.strength === "Strong" ? "bull" : signal.strength === "Moderate" ? "warning" : "muted"}>
               {signal.strength}
             </Pill>
           </div>
+          <p className="mt-1 text-[11px] text-muted-foreground">
+            Setup: <span className="text-foreground/80 font-medium">{signal.setup}</span>
+          </p>
         </div>
         <div className="text-right">
-          <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Confidence</div>
+          <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Probability</div>
           <div className={cn("font-mono-tab text-2xl font-bold", isBuy ? "text-bull" : "text-bear")}>
-            {signal.confidence}%
+            {signal.probability}%
           </div>
         </div>
       </div>
@@ -71,6 +85,13 @@ export function SignalCard({ signal, digits, onLogTrade }: Props) {
         <Level label="Stop Loss" value={fmt(signal.stopLoss)} tone="bear" />
         <Level label="TP 1" value={fmt(signal.takeProfit1)} tone="bull" />
         <Level label="TP 2" value={fmt(signal.takeProfit2)} tone="bull" />
+      </div>
+
+      <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4 text-[10px]">
+        <ExpMetric label="Expected Move" value={fmt(signal.expectedMove)} />
+        <ExpMetric label="Trend Strength" value={signal.expectedTrendStrength} />
+        <ExpMetric label="Hold ~" value={signal.expectedHoldingLabel} />
+        <ExpMetric label="R:R" value={`1:${signal.expectedRiskReward}`} />
       </div>
 
       <div className="mt-3 flex flex-wrap items-center gap-2">
@@ -130,6 +151,15 @@ function Level({ label, value, tone = "default" }: { label: string; value: strin
         tone === "bull" ? "text-bull" : tone === "bear" ? "text-bear" : "text-foreground")}>
         {value}
       </div>
+    </div>
+  );
+}
+
+function ExpMetric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-md border border-border/40 bg-background/30 px-2 py-1.5">
+      <div className="text-[9px] uppercase tracking-wider text-muted-foreground">{label}</div>
+      <div className="font-mono-tab text-[11px] font-semibold text-foreground/90">{value}</div>
     </div>
   );
 }

@@ -566,10 +566,98 @@ export function generateSignal(c: Candle[], symbol: Symbol, tf: Timeframe): Sign
   }
 
   // Spread quality gate: if spread eats too much of the SL, reject.
-  if (side !== "NONE" && slDist > 0) {
-    const spreadPct = (analysis.spread / slDist) * 100;
-    if (spreadPct > th.maxSpreadOverSlPct) side = "NONE";
-  }
+  let spreadPct = 0;
+  if (slDist > 0) spreadPct = (analysis.spread / slDist) * 100;
+  const spreadPass = slDist > 0 ? spreadPct <= th.maxSpreadOverSlPct : true;
+  if (side !== "NONE" && !spreadPass) side = "NONE";
+
+  // --- Diagnostic filter evaluation ----------------------------------------
+  // Evaluated for EVERY tick, whether or not the signal fires, so the UI can
+  // show exactly what's blocking a trade and how close each gate is.
+  const requiredAdxSoft = th.adxTrendMin * 0.75;
+  const filters: FilterCheck[] = [
+    {
+      key: "confidence",
+      label: "Confidence ≥ threshold",
+      pass: confidence >= th.minConfidence,
+      actual: confidence,
+      required: th.minConfidence,
+      unit: "%",
+      progress: clamp(confidence / th.minConfidence, 0, 1),
+      detail: `Weighted confidence ${confidence}% vs required ${th.minConfidence}%.`,
+    },
+    {
+      key: "edge",
+      label: "Directional edge ≥ minimum",
+      pass: edge >= th.minEdgePct,
+      actual: +edge.toFixed(1),
+      required: th.minEdgePct,
+      unit: "%",
+      progress: clamp(edge / th.minEdgePct, 0, 1),
+      detail: `Bull ${bullScore.toFixed(0)} vs Bear ${bearScore.toFixed(0)} → edge ${edge.toFixed(0)}% (need ${th.minEdgePct}%).`,
+    },
+    {
+      key: "adx",
+      label: "Trend strength (ADX)",
+      pass: adxVal >= requiredAdxSoft,
+      actual: +adxVal.toFixed(1),
+      required: +requiredAdxSoft.toFixed(1),
+      progress: clamp(adxVal / requiredAdxSoft, 0, 1),
+      detail: `ADX ${adxVal.toFixed(0)} vs soft floor ${requiredAdxSoft.toFixed(0)} (hard trend ≥ ${th.adxTrendMin}).`,
+    },
+    {
+      key: "spread",
+      label: "Spread cost vs SL",
+      pass: spreadPass,
+      actual: +spreadPct.toFixed(1),
+      required: th.maxSpreadOverSlPct,
+      unit: "%",
+      progress: spreadPct <= th.maxSpreadOverSlPct ? 1 : clamp(th.maxSpreadOverSlPct / Math.max(spreadPct, 0.01), 0, 1),
+      detail: `Spread is ${spreadPct.toFixed(1)}% of the ${th.slAtrMult}×ATR stop (max allowed ${th.maxSpreadOverSlPct}%).`,
+    },
+    {
+      key: "quality",
+      label: "Setup quality floor",
+      pass: qualityScore >= th.qualityFloor * 100,
+      actual: +qualityScore.toFixed(0),
+      required: +(th.qualityFloor * 100).toFixed(0),
+      unit: "%",
+      progress: clamp(qualityScore / (th.qualityFloor * 100), 0, 1),
+      detail: `Session/volatility/squeeze quality ${qualityScore.toFixed(0)}% (floor ${(th.qualityFloor * 100).toFixed(0)}%).`,
+    },
+  ];
+
+  const failed = filters.filter((f) => !f.pass);
+  const blockingFilter = failed[0] ?? null;
+  const closestToPassing = [...failed].sort((a, b) => b.progress - a.progress).slice(0, 3);
+
+  const rejectionReason = side !== "NONE"
+    ? ""
+    : failed.length === 0
+      ? `Setup is technically valid but was suppressed after level checks — verify entry, SL and spread.`
+      : `Blocked by ${blockingFilter!.label}: ${blockingFilter!.detail}` +
+        (failed.length > 1
+          ? ` Also failing: ${failed.slice(1).map((f) => f.label).join(", ")}.`
+          : "");
+
+  const diagnostics: SignalDiagnostics = {
+    currentConfidence: confidence,
+    requiredConfidence: th.minConfidence,
+    bullScore: +bullScore.toFixed(1),
+    bearScore: +bearScore.toFixed(1),
+    qualityScore: +qualityScore.toFixed(1),
+    edge: +edge.toFixed(1),
+    requiredEdge: th.minEdgePct,
+    adxValue: +adxVal.toFixed(1),
+    requiredAdx: +requiredAdxSoft.toFixed(1),
+    riskRewardEstimate: th.tp1RMult,
+    qualityMultiplier: +qualityMult.toFixed(3),
+    dominantSide: dominant as "BUY" | "SELL",
+    filters,
+    blockingFilter,
+    closestToPassing,
+    rejectionReason,
+  };
 
   // --- Explanation ----------------------------------------------------------
   const reasonsList = contribs
@@ -589,16 +677,13 @@ export function generateSignal(c: Candle[], symbol: Symbol, tf: Timeframe): Sign
 
   const explanation =
     side === "NONE"
-      ? `No high-quality setup on ${symbol} ${tf}. Bull score ${bullScore.toFixed(
-          0,
-        )} vs bear ${bearScore.toFixed(0)} (edge ${edge.toFixed(
-          0,
-        )}%). Confidence ${confidence}% is below the ${th.minConfidence}% threshold — waiting for clearer confluence.`
+      ? `No high-quality setup on ${symbol} ${tf}. ${rejectionReason}`
       : `${symbol} ${tf}: ${dominant} bias at ${confidence}% confidence. Bull ${bullScore.toFixed(
           0,
         )} / Bear ${bearScore.toFixed(0)}, quality ${qualityScore.toFixed(
           0,
         )}%, ADX ${adxVal.toFixed(0)}. Structured ${dominant === "BUY" ? "long" : "short"} with ${th.tp1RMult}R first target and ${th.tp2RMult}R runner.`;
+
 
   const aiSummary =
     side === "NONE"

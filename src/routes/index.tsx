@@ -187,6 +187,16 @@ function TradingDashboard() {
 
   const ready = candles.length >= 30;
 
+  // Record every evaluation (fired or rejected) into the diagnostics store.
+  // Must run before any early return to keep hook order stable.
+  useEffect(() => {
+    if (ready) {
+      const sig = generateSignal(candles, symbol, timeframe);
+      recordSignal(sig);
+    }
+    for (const row of scan) if (row.signal) recordSignal(row.signal);
+  }, [ready, candles, symbol, timeframe, scan]);
+
   if (!ready) {
     return (
       <div className="min-h-screen bg-background text-foreground">

@@ -24,10 +24,14 @@ export function DiagnosticsPanel({
 
   return (
     <div className="rounded-xl border border-border/60 bg-surface p-4">
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2 flex-wrap">
         <AlertTriangle className={cn("h-4 w-4", fired ? "text-bull" : "text-warning")} />
         <h3 className="text-sm font-semibold">Why {fired ? "This Trade" : "No Trade"}?</h3>
         <Pill tone={fired ? "bull" : "muted"}>{symbol} · {timeframe}</Pill>
+        <Pill tone={d.grade === "A+" || d.grade === "A" ? "bull" : d.grade === "B" ? "info" : d.grade === "C" ? "warning" : "muted"}>
+          Grade {d.grade}
+        </Pill>
+        <Pill tone="muted">{d.setup}</Pill>
         <span className="ml-auto flex items-center gap-1 text-[10px] text-muted-foreground">
           <Clock className="h-3 w-3" /> last valid {formatTimeAgo(bucket.lastValidAt)}
         </span>
@@ -35,18 +39,50 @@ export function DiagnosticsPanel({
 
       <p className="mt-2 text-[12px] leading-relaxed text-foreground/90">
         {fired
-          ? `Valid ${d.dominantSide} setup — every filter passed. Confidence ${d.currentConfidence}% vs required ${d.requiredConfidence}%.`
+          ? `${d.grade}-grade ${d.dominantSide} setup — ${d.setup}. Probability ${d.probability}% (grade C floor ${d.requiredConfidence}%).`
           : d.rejectionReason}
+      </p>
+      <p className="mt-1 text-[11px] leading-relaxed text-info">
+        → {d.needToPass}
       </p>
 
       <div className="mt-3 grid grid-cols-3 gap-2 text-[10px]">
-        <Metric label="Confidence" value={`${d.currentConfidence}%`} sub={`need ${d.requiredConfidence}%`} good={d.currentConfidence >= d.requiredConfidence} />
-        <Metric label="Edge" value={`${d.edge}%`} sub={`need ${d.requiredEdge}%`} good={d.edge >= d.requiredEdge} />
-        <Metric label="ADX" value={d.adxValue.toFixed(0)} sub={`need ${d.requiredAdx.toFixed(0)}`} good={d.adxValue >= d.requiredAdx} />
-        <Metric label="Bull" value={d.bullScore.toFixed(0)} sub="score" tone="bull" />
-        <Metric label="Bear" value={d.bearScore.toFixed(0)} sub="score" tone="bear" />
+        <Metric label="Probability" value={`${d.probability}%`} sub={`grade ${d.grade}`} good={d.probability >= d.requiredConfidence} />
+        <Metric label="Bull Prob" value={`${d.bullProbability}%`} sub="setup-adj" tone="bull" />
+        <Metric label="Bear Prob" value={`${d.bearProbability}%`} sub="setup-adj" tone="bear" />
+        <Metric label="Bull Raw" value={d.bullScore.toFixed(0)} sub="score" tone="bull" />
+        <Metric label="Bear Raw" value={d.bearScore.toFixed(0)} sub="score" tone="bear" />
         <Metric label="Quality" value={`${d.qualityScore.toFixed(0)}%`} sub={`R:R 1:${d.riskRewardEstimate}`} tone="info" />
       </div>
+
+      {(d.topBoosters.length > 0 || d.topReducers.length > 0) && (
+        <div className="mt-3 grid grid-cols-2 gap-2 text-[10px]">
+          <div className="rounded-md border border-bull/25 bg-bull/5 p-2">
+            <div className="uppercase tracking-wider text-bull">Top boosters</div>
+            <ul className="mt-1 space-y-0.5">
+              {d.topBoosters.map((b) => (
+                <li key={b.label} className="flex items-center gap-1.5">
+                  <span className="truncate text-foreground/90">{b.label}</span>
+                  <span className="ml-auto font-mono-tab text-bull">+{b.delta}</span>
+                </li>
+              ))}
+              {d.topBoosters.length === 0 && <li className="text-muted-foreground">None</li>}
+            </ul>
+          </div>
+          <div className="rounded-md border border-bear/25 bg-bear/5 p-2">
+            <div className="uppercase tracking-wider text-bear">Top reducers</div>
+            <ul className="mt-1 space-y-0.5">
+              {d.topReducers.map((b) => (
+                <li key={b.label} className="flex items-center gap-1.5">
+                  <span className="truncate text-foreground/90">{b.label}</span>
+                  <span className="ml-auto font-mono-tab text-bear">{b.delta}</span>
+                </li>
+              ))}
+              {d.topReducers.length === 0 && <li className="text-muted-foreground">None</li>}
+            </ul>
+          </div>
+        </div>
+      )}
 
       <div className="mt-3">
         <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Filter status</div>

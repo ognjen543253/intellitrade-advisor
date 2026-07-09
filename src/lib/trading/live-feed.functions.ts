@@ -53,13 +53,13 @@ type LiveFeedResult = { candles: LiveCandle[]; source: string; error?: string };
 const SCAN_TIMEFRAMES = ["1m", "5m", "15m", "1h", "4h"] as const;
 
 export const fetchLiveCandles = createServerFn({ method: "GET" })
-  .inputValidator((data: { symbol: string; timeframe: string }) => data)
+  .validator((data: { symbol: string; timeframe: string }) => data)
   .handler(async ({ data }): Promise<LiveFeedResult> => {
     return loadLiveCandles(data.symbol, data.timeframe);
   });
 
 export const fetchLivePrice = createServerFn({ method: "GET" })
-  .inputValidator((data: { symbol: string }) => data)
+  .validator((data: { symbol: string }) => data)
   .handler(async ({ data }): Promise<{ price: number | null; source: string; error?: string }> => {
     const apiKey = process.env.TWELVE_DATA_API_KEY;
     if (apiKey) {
@@ -95,7 +95,7 @@ export const fetchLivePrice = createServerFn({ method: "GET" })
   });
 
 export const fetchLiveScan = createServerFn({ method: "GET" })
-  .inputValidator((data: { symbol: string }) => data)
+  .validator((data: { symbol: string }) => data)
   .handler(async ({ data }): Promise<{ rows: Array<LiveFeedResult & { timeframe: string }> }> => {
     const rows = [];
     for (const timeframe of SCAN_TIMEFRAMES) {

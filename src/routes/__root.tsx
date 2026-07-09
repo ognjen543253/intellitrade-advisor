@@ -105,7 +105,7 @@ function RootShell({ children }: { children: ReactNode }) {
       <head suppressHydrationWarning>
         <HeadContent />
       </head>
-      <body className="bg-background text-foreground">
+      <body className="bg-background text-foreground" suppressHydrationWarning>
         {children}
         <Scripts />
       </body>

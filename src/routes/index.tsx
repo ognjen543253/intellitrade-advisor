@@ -7,6 +7,8 @@ import { Pill, Stat } from "@/components/trading/Stat";
 import { YearCalendar } from "@/components/trading/YearCalendar";
 import { LearningPanel } from "@/components/trading/LearningPanel";
 import { TradeLog } from "@/components/trading/TradeLog";
+import { DiagnosticsPanel } from "@/components/trading/DiagnosticsPanel";
+import { recordSignal } from "@/lib/trading/diagnostics-store";
 import {
   SYMBOLS, TIMEFRAMES,
   type Symbol, type Timeframe, type Candle,

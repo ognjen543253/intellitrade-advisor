@@ -42,6 +42,7 @@ const MAX_REJECTIONS = 200;
 const listeners = new Set<() => void>();
 
 let cache: Store | null = null;
+let version = 0;
 
 function read(): Store {
   if (cache) return cache;
@@ -51,6 +52,7 @@ function read(): Store {
 }
 function write(s: Store) {
   cache = s;
+  version += 1;
   if (typeof window !== "undefined") localStorage.setItem(KEY, JSON.stringify(s));
   listeners.forEach((l) => l());
 }
@@ -62,6 +64,10 @@ function ensureBucket(store: Store, key: string): Bucket {
 export function subscribeDiagnostics(fn: () => void) {
   listeners.add(fn);
   return () => { listeners.delete(fn); };
+}
+
+export function getDiagnosticsVersion() {
+  return version;
 }
 
 export function recordSignal(sig: Signal) {

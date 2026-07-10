@@ -602,9 +602,10 @@ export function generateSignal(
   const dominant: "BUY" | "SELL" = bullScore >= bearScore ? "BUY" : "SELL";
   const dominantRaw = Math.max(bullScore, bearScore);
   const opposingRaw = Math.min(bullScore, bearScore);
+  const dominantEvidence = Math.max(bullRaw, bearRaw);
   const directionalEvidence = bullRaw + bearRaw;
   const evidenceCoverage = dirMax ? (directionalEvidence / dirMax) * 100 : 0;
-  const alignmentPct = directionalEvidence ? (dominantRaw / directionalEvidence) * 100 : 0;
+  const alignmentPct = directionalEvidence ? (dominantEvidence / directionalEvidence) * 100 : 0;
   const minConfluencePct = 60;
   const minEvidenceCoveragePct = 22;
   const majorityPass = alignmentPct >= minConfluencePct && evidenceCoverage >= minEvidenceCoveragePct;
@@ -621,23 +622,23 @@ export function generateSignal(
   const rawProb = Math.max(rawScoreProb, majorityProb);
   const probability = Math.round(clamp(rawProb + setupBoost, 0, 99));
 
-  const sideProbability = (sideRaw: number, otherRaw: number, setupBias: boolean) => {
-    const active = sideRaw + otherRaw;
-    const sideAlignment = active ? (sideRaw / active) * 100 : 0;
+  const sideProbability = (sideScore: number, otherScore: number, sideEvidence: number, otherEvidence: number, setupBias: boolean) => {
+    const active = sideEvidence + otherEvidence;
+    const sideAlignment = active ? (sideEvidence / active) * 100 : 0;
     const sideCoverage = dirMax ? (active / dirMax) * 100 : 0;
     const sidePenalty = sideCoverage < minEvidenceCoveragePct
       ? clamp(sideCoverage / minEvidenceCoveragePct, 0, 1)
       : 1;
     const sideMajorityProb = (sideAlignment * 0.76 + sideCoverage * 0.24) * qualityMult * sidePenalty;
-    const sideRawProb = Math.max(0, sideRaw - clamp(otherRaw / 100, 0, 1) * 25) * qualityMult;
+    const sideRawProb = Math.max(0, sideScore - clamp(otherScore / 100, 0, 1) * 25) * qualityMult;
     return Math.round(clamp(
       Math.max(sideRawProb, sideMajorityProb) + (setupBias ? 6 * setupInfo.confidence : 0),
       0,
       99,
     ));
   };
-  const bullProbability = sideProbability(bullScore, bearScore, setupInfo.bias === "bull");
-  const bearProbability = sideProbability(bearScore, bullScore, setupInfo.bias === "bear");
+  const bullProbability = sideProbability(bullScore, bearScore, bullRaw, bearRaw, setupInfo.bias === "bull");
+  const bearProbability = sideProbability(bearScore, bullScore, bearRaw, bullRaw, setupInfo.bias === "bear");
 
   const grade = gradeFor(probability);
   const edge = Math.abs(bullScore - bearScore);

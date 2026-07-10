@@ -593,24 +593,52 @@ export function generateSignal(
   const qualityMult = th.qualityFloor + (1 - th.qualityFloor) * (qualityScore / 100);
 
   // Probability model:
-  //   dominant side raw = bullScore or bearScore (0..100)
-  //   opposing pressure reduces it by up to 40%
-  //   quality multiplier is now [0.7, 1.0] — a soft dampener
-  //   result clamped to 0..99.
+  //   - Use majority-of-active-evidence first: if most weighted steps point in
+  //     one direction, the bot can trade even when every possible indicator is
+  //     not firing.
+  //   - Require at least 60% directional confluence and enough active evidence
+  //     so a single tiny signal cannot create a trade by itself.
+  //   - Keep the old raw-score model as a floor for very clean high-weight setups.
   const dominant: "BUY" | "SELL" = bullScore >= bearScore ? "BUY" : "SELL";
   const dominantRaw = Math.max(bullScore, bearScore);
   const opposingRaw = Math.min(bullScore, bearScore);
-  const opposingDrag = clamp(opposingRaw / 100, 0, 1) * 40;
-  const rawProb = Math.max(0, dominantRaw - opposingDrag) * qualityMult;
+  const dominantEvidence = Math.max(bullRaw, bearRaw);
+  const directionalEvidence = bullRaw + bearRaw;
+  const evidenceCoverage = dirMax ? (directionalEvidence / dirMax) * 100 : 0;
+  const alignmentPct = directionalEvidence ? (dominantEvidence / directionalEvidence) * 100 : 0;
+  const minConfluencePct = 60;
+  const minEvidenceCoveragePct = 22;
+  const majorityPass = alignmentPct >= minConfluencePct && evidenceCoverage >= minEvidenceCoveragePct;
+  const evidencePenalty = evidenceCoverage < minEvidenceCoveragePct
+    ? clamp(evidenceCoverage / minEvidenceCoveragePct, 0, 1)
+    : 1;
+  const majorityProb = (alignmentPct * 0.76 + evidenceCoverage * 0.24) * qualityMult * evidencePenalty;
+  const opposingDrag = clamp(opposingRaw / 100, 0, 1) * 25;
+  const rawScoreProb = Math.max(0, dominantRaw - opposingDrag) * qualityMult;
   // Small boost when named setup aligns with dominant bias.
   const setupAligned = setupInfo.setup !== "No Setup"
     && ((dominant === "BUY" && setupInfo.bias === "bull") || (dominant === "SELL" && setupInfo.bias === "bear"));
   const setupBoost = setupAligned ? 6 * setupInfo.confidence : 0;
+  const rawProb = Math.max(rawScoreProb, majorityProb);
   const probability = Math.round(clamp(rawProb + setupBoost, 0, 99));
-  const bullProbability = Math.round(clamp(Math.max(0, bullScore - (bearScore / 100) * 40) * qualityMult
-    + (setupInfo.bias === "bull" ? 6 * setupInfo.confidence : 0), 0, 99));
-  const bearProbability = Math.round(clamp(Math.max(0, bearScore - (bullScore / 100) * 40) * qualityMult
-    + (setupInfo.bias === "bear" ? 6 * setupInfo.confidence : 0), 0, 99));
+
+  const sideProbability = (sideScore: number, otherScore: number, sideEvidence: number, otherEvidence: number, setupBias: boolean) => {
+    const active = sideEvidence + otherEvidence;
+    const sideAlignment = active ? (sideEvidence / active) * 100 : 0;
+    const sideCoverage = dirMax ? (active / dirMax) * 100 : 0;
+    const sidePenalty = sideCoverage < minEvidenceCoveragePct
+      ? clamp(sideCoverage / minEvidenceCoveragePct, 0, 1)
+      : 1;
+    const sideMajorityProb = (sideAlignment * 0.76 + sideCoverage * 0.24) * qualityMult * sidePenalty;
+    const sideRawProb = Math.max(0, sideScore - clamp(otherScore / 100, 0, 1) * 25) * qualityMult;
+    return Math.round(clamp(
+      Math.max(sideRawProb, sideMajorityProb) + (setupBias ? 6 * setupInfo.confidence : 0),
+      0,
+      99,
+    ));
+  };
+  const bullProbability = sideProbability(bullScore, bearScore, bullRaw, bearRaw, setupInfo.bias === "bull");
+  const bearProbability = sideProbability(bearScore, bullScore, bearRaw, bullRaw, setupInfo.bias === "bear");
 
   const grade = gradeFor(probability);
   const edge = Math.abs(bullScore - bearScore);
@@ -623,8 +651,8 @@ export function generateSignal(
   const tp2Dist = slDist * th.tp2RMult;
   let entry = price, sl = price, tp1 = price, tp2 = price;
 
-  // Grade C or better = tradeable side; No = flat.
-  let side: Side = grade === "None" ? "NONE" : dominant;
+  // Grade C or better + 60% weighted confluence = tradeable side; otherwise flat.
+  let side: Side = grade === "None" || !majorityPass ? "NONE" : dominant;
 
   if (side === "BUY") {
     entry = price; sl = round(price - slDist, meta.digits);
@@ -646,6 +674,16 @@ export function generateSignal(
       pass: probability >= th.gradeC, actual: probability, required: th.gradeC, unit: "%",
       progress: clamp(probability / th.gradeC, 0, 1),
       detail: `Weighted probability ${probability}% vs C-grade floor ${th.gradeC}%.`,
+    },
+    {
+      key: "confluence", label: "60% weighted confluence",
+      pass: majorityPass,
+      actual: +alignmentPct.toFixed(0), required: minConfluencePct, unit: "%",
+      progress: Math.min(
+        clamp(alignmentPct / minConfluencePct, 0, 1),
+        clamp(evidenceCoverage / minEvidenceCoveragePct, 0, 1),
+      ),
+      detail: `${alignmentPct.toFixed(0)}% of active weighted evidence supports ${dominant}; active evidence coverage ${evidenceCoverage.toFixed(0)}% (min ${minEvidenceCoveragePct}%).`,
     },
     {
       key: "setup", label: "Named setup detected",
@@ -694,6 +732,9 @@ export function generateSignal(
   let rejectionReason = "";
   if (side === "NONE") {
     if (!spreadPass) rejectionReason = `Spread ${spreadPct.toFixed(1)}% of stop — trading cost too high.`;
+    else if (!majorityPass) {
+      rejectionReason = `Weighted evidence is not strong enough yet: ${alignmentPct.toFixed(0)}% supports ${dominant} with ${evidenceCoverage.toFixed(0)}% active coverage. Need 60% confluence and ${minEvidenceCoveragePct}% coverage.`;
+    }
     else if (setupInfo.setup === "No Setup" && probability < th.gradeC) {
       rejectionReason = `No named setup and probability ${probability}% is below C-grade floor (${th.gradeC}%). Structure ${structure}, ADX ${adxVal.toFixed(0)}.`;
     } else if (probability < th.gradeC) {
@@ -706,6 +747,8 @@ export function generateSignal(
   const gap = Math.max(0, th.gradeC - probability);
   const needToPass = side !== "NONE"
     ? `Already tradeable at grade ${grade}. Next tier at ${grade === "C" ? th.gradeB : grade === "B" ? th.gradeA : th.gradeAPlus}%.`
+    : !majorityPass
+      ? `Need 60% weighted confluence and ${minEvidenceCoveragePct}% active evidence. Current: ${alignmentPct.toFixed(0)}% confluence / ${evidenceCoverage.toFixed(0)}% coverage.`
     : gap === 0
       ? `Fix the blocking gate: ${blockingFilter?.label ?? "spread/data"}.`
       : `Need +${gap}% probability. Biggest reducer: ${topReducers[0]?.label ?? "opposing pressure"}.`;

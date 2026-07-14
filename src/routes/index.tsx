@@ -8,6 +8,8 @@ import { YearCalendar } from "@/components/trading/YearCalendar";
 import { LearningPanel } from "@/components/trading/LearningPanel";
 import { TradeLog } from "@/components/trading/TradeLog";
 import { DiagnosticsPanel } from "@/components/trading/DiagnosticsPanel";
+import { TelegramAlerts, loadChatIds } from "@/components/trading/TelegramAlerts";
+import { sendTelegramMessage } from "@/lib/trading/telegram.functions";
 import { recordSignal } from "@/lib/trading/diagnostics-store";
 import {
   SYMBOLS, TIMEFRAMES,
@@ -235,6 +237,45 @@ function TradingDashboard() {
     logTradeFromSignal(sig, sizing.riskAmount || 100);
   };
 
+  // ── Telegram alerts: fire once per unique qualifying signal across all TFs ──
+  const sendTg = useServerFn(sendTelegramMessage);
+  const alertedRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (!alertsOn) return;
+    const chatIds = loadChatIds();
+    if (chatIds.length === 0) return;
+
+    const candidates: { tf: Timeframe; sig: Signal }[] = [];
+    // include active signal + every scanned TF
+    if (signal.side !== "NONE") candidates.push({ tf: timeframe, sig: signal });
+    for (const row of scan) {
+      if (row.signal && row.signal.side !== "NONE") candidates.push({ tf: row.timeframe, sig: row.signal });
+    }
+
+    for (const { tf, sig } of candidates) {
+      const key = `${symbol}:${tf}:${sig.side}:${sig.grade}:${sig.entry.toFixed(meta.digits)}`;
+      if (alertedRef.current.has(key)) continue;
+      alertedRef.current.add(key);
+      const arrow = sig.side === "BUY" ? "🟢 BUY" : "🔴 SELL";
+      const rr = Math.abs((sig.takeProfit2 - sig.entry) / (sig.entry - sig.stopLoss)).toFixed(2);
+      const text =
+        `<b>${arrow} ${symbol} · ${tf}</b>\n` +
+        `Grade <b>${sig.grade}</b> · ${sig.probability}% probability\n` +
+        `Setup: ${sig.setup ?? "—"}\n\n` +
+        `Entry: <code>${sig.entry.toFixed(meta.digits)}</code>\n` +
+        `Stop:  <code>${sig.stopLoss.toFixed(meta.digits)}</code>\n` +
+        `TP1:   <code>${sig.takeProfit1.toFixed(meta.digits)}</code>\n` +
+        `TP2:   <code>${sig.takeProfit2.toFixed(meta.digits)}</code>\n` +
+        `R:R ≈ 1:${rr}`;
+      chatIds.forEach((chatId) => {
+        sendTg({ data: { chatId, text } }).catch(() => {});
+      });
+    }
+    // cap memory
+    if (alertedRef.current.size > 200) alertedRef.current = new Set(Array.from(alertedRef.current).slice(-100));
+  }, [alertsOn, symbol, timeframe, signal, scan, sendTg, meta.digits]);
+
+
 
   return (
     <div className="min-h-screen bg-background text-foreground">
@@ -386,30 +427,8 @@ function TradingDashboard() {
             </div>
 
 
-            <div className="rounded-xl border border-border/60 bg-surface p-4">
-              <div className="flex items-center gap-2">
-                <Radio className="h-4 w-4 text-info" />
-                <h3 className="text-sm font-semibold">Alert Channels</h3>
-              </div>
-              <p className="mt-1 text-xs text-muted-foreground">
-                The AI will only fire when all confluence rules align and R:R ≥ 1:2.
-              </p>
-              <div className="mt-3 space-y-2">
-                {[
-                  { id: "push", label: "Push notification", enabled: alertsOn },
-                  { id: "email", label: "Email", enabled: alertsOn },
-                  { id: "telegram", label: "Telegram", enabled: false },
-                ].map(c => (
-                  <div key={c.id} className="flex items-center justify-between rounded-lg border border-border/50 bg-background/40 px-3 py-2">
-                    <span className="text-xs">{c.label}</span>
-                    <Pill tone={c.enabled ? "bull" : "muted"}>{c.enabled ? "Active" : "Off"}</Pill>
-                  </div>
-                ))}
-              </div>
-              <p className="mt-3 text-[10px] leading-relaxed text-muted-foreground">
-                Connect email & Telegram delivery in the next phase.
-              </p>
-            </div>
+            <TelegramAlerts />
+
 
             <div className="rounded-xl border border-border/60 bg-surface p-4">
               <h3 className="text-sm font-semibold">AI Avoids Trading During</h3>

@@ -427,30 +427,8 @@ function TradingDashboard() {
             </div>
 
 
-            <div className="rounded-xl border border-border/60 bg-surface p-4">
-              <div className="flex items-center gap-2">
-                <Radio className="h-4 w-4 text-info" />
-                <h3 className="text-sm font-semibold">Alert Channels</h3>
-              </div>
-              <p className="mt-1 text-xs text-muted-foreground">
-                The AI will only fire when all confluence rules align and R:R ≥ 1:2.
-              </p>
-              <div className="mt-3 space-y-2">
-                {[
-                  { id: "push", label: "Push notification", enabled: alertsOn },
-                  { id: "email", label: "Email", enabled: alertsOn },
-                  { id: "telegram", label: "Telegram", enabled: false },
-                ].map(c => (
-                  <div key={c.id} className="flex items-center justify-between rounded-lg border border-border/50 bg-background/40 px-3 py-2">
-                    <span className="text-xs">{c.label}</span>
-                    <Pill tone={c.enabled ? "bull" : "muted"}>{c.enabled ? "Active" : "Off"}</Pill>
-                  </div>
-                ))}
-              </div>
-              <p className="mt-3 text-[10px] leading-relaxed text-muted-foreground">
-                Connect email & Telegram delivery in the next phase.
-              </p>
-            </div>
+            <TelegramAlerts />
+
 
             <div className="rounded-xl border border-border/60 bg-surface p-4">
               <h3 className="text-sm font-semibold">AI Avoids Trading During</h3>

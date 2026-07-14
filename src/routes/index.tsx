@@ -237,6 +237,45 @@ function TradingDashboard() {
     logTradeFromSignal(sig, sizing.riskAmount || 100);
   };
 
+  // ── Telegram alerts: fire once per unique qualifying signal across all TFs ──
+  const sendTg = useServerFn(sendTelegramMessage);
+  const alertedRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (!alertsOn) return;
+    const chatIds = loadChatIds();
+    if (chatIds.length === 0) return;
+
+    const candidates: { tf: Timeframe; sig: Signal }[] = [];
+    // include active signal + every scanned TF
+    if (signal.side !== "NONE") candidates.push({ tf: timeframe, sig: signal });
+    for (const row of scan) {
+      if (row.signal && row.signal.side !== "NONE") candidates.push({ tf: row.timeframe, sig: row.signal });
+    }
+
+    for (const { tf, sig } of candidates) {
+      const key = `${symbol}:${tf}:${sig.side}:${sig.grade}:${sig.entry.toFixed(meta.digits)}`;
+      if (alertedRef.current.has(key)) continue;
+      alertedRef.current.add(key);
+      const arrow = sig.side === "BUY" ? "🟢 BUY" : "🔴 SELL";
+      const rr = Math.abs((sig.takeProfit2 - sig.entry) / (sig.entry - sig.stopLoss)).toFixed(2);
+      const text =
+        `<b>${arrow} ${symbol} · ${tf}</b>\n` +
+        `Grade <b>${sig.grade}</b> · ${sig.probability}% probability\n` +
+        `Setup: ${sig.setup ?? "—"}\n\n` +
+        `Entry: <code>${sig.entry.toFixed(meta.digits)}</code>\n` +
+        `Stop:  <code>${sig.stopLoss.toFixed(meta.digits)}</code>\n` +
+        `TP1:   <code>${sig.takeProfit1.toFixed(meta.digits)}</code>\n` +
+        `TP2:   <code>${sig.takeProfit2.toFixed(meta.digits)}</code>\n` +
+        `R:R ≈ 1:${rr}`;
+      chatIds.forEach((chatId) => {
+        sendTg({ data: { chatId, text } }).catch(() => {});
+      });
+    }
+    // cap memory
+    if (alertedRef.current.size > 200) alertedRef.current = new Set(Array.from(alertedRef.current).slice(-100));
+  }, [alertsOn, symbol, timeframe, signal, scan, sendTg, meta.digits]);
+
+
 
   return (
     <div className="min-h-screen bg-background text-foreground">

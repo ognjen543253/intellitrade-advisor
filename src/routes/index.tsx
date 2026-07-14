@@ -8,6 +8,8 @@ import { YearCalendar } from "@/components/trading/YearCalendar";
 import { LearningPanel } from "@/components/trading/LearningPanel";
 import { TradeLog } from "@/components/trading/TradeLog";
 import { DiagnosticsPanel } from "@/components/trading/DiagnosticsPanel";
+import { TelegramAlerts, loadChatIds } from "@/components/trading/TelegramAlerts";
+import { sendTelegramMessage } from "@/lib/trading/telegram.functions";
 import { recordSignal } from "@/lib/trading/diagnostics-store";
 import {
   SYMBOLS, TIMEFRAMES,

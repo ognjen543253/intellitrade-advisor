@@ -14,6 +14,15 @@ export function NotificationSettings() {
   const [status, setStatus] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const send = useServerFn(sendTelegramMessage);
+  const registerWebhook = useServerFn(setTelegramWebhook);
+
+  const enableCommands = async () => {
+    setBusy(true); setStatus(null);
+    const url = `${window.location.origin}/api/public/telegram/webhook`;
+    const res = await registerWebhook({ data: { url } });
+    setStatus(res.ok ? `Commands enabled at ${url}` : `Webhook failed: ${res.error}`);
+    setBusy(false);
+  };
 
   useEffect(() => subscribeSettings(() => setS(getSettings())), []);
 

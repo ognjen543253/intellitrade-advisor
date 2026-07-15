@@ -107,6 +107,13 @@ export function NotificationSettings() {
       >
         <Check className="h-3.5 w-3.5" /> Test connection
       </button>
+      <button
+        onClick={enableCommands}
+        disabled={busy}
+        className="mt-2 inline-flex w-full items-center justify-center gap-1.5 rounded-lg border border-border bg-background px-3 py-2 text-xs font-medium hover:bg-surface disabled:opacity-50"
+      >
+        Enable /commands (register webhook)
+      </button>
       {status && <div className="mt-2 text-[11px] text-muted-foreground">{status}</div>}
     </div>
   );

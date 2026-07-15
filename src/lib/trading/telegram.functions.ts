@@ -1,24 +1,21 @@
 import { createServerFn } from "@tanstack/react-start";
 
-const GATEWAY = "https://connector-gateway.lovable.dev/telegram";
+function botToken() {
+  const t = process.env.TELEGRAM_BOT_TOKEN;
+  if (!t) throw new Error("TELEGRAM_BOT_TOKEN not configured");
+  return t;
+}
 
-function authHeaders() {
-  const lk = process.env.LOVABLE_API_KEY;
-  const tk = process.env.TELEGRAM_API_KEY;
-  if (!lk || !tk) throw new Error("Telegram connector not configured");
-  return {
-    Authorization: `Bearer ${lk}`,
-    "X-Connection-Api-Key": tk,
-    "Content-Type": "application/json",
-  };
+function api(method: string) {
+  return `https://api.telegram.org/bot${botToken()}/${method}`;
 }
 
 export const sendTelegramMessage = createServerFn({ method: "POST" })
   .inputValidator((d: { chatId: string; text: string }) => d)
   .handler(async ({ data }) => {
-    const res = await fetch(`${GATEWAY}/sendMessage`, {
+    const res = await fetch(api("sendMessage"), {
       method: "POST",
-      headers: authHeaders(),
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         chat_id: data.chatId,
         text: data.text,
@@ -35,9 +32,9 @@ export const sendTelegramMessage = createServerFn({ method: "POST" })
 
 /** Fetch recent updates so users can discover their chat_id after messaging the bot. */
 export const listRecentChats = createServerFn({ method: "GET" }).handler(async () => {
-  const res = await fetch(`${GATEWAY}/getUpdates`, {
+  const res = await fetch(api("getUpdates"), {
     method: "POST",
-    headers: authHeaders(),
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ limit: 20, allowed_updates: ["message"] }),
   });
   const body = await res.json().catch(() => ({}));

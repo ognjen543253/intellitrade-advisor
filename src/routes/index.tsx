@@ -256,17 +256,19 @@ function TradingDashboard() {
       const key = `${symbol}:${tf}:${sig.side}:${sig.grade}:${sig.entry.toFixed(meta.digits)}`;
       if (alertedRef.current.has(key)) continue;
       alertedRef.current.add(key);
-      const arrow = sig.side === "BUY" ? "🟢 BUY" : "🔴 SELL";
+      const action = sig.side === "BUY" ? "🟢 BUY NOW" : "🔴 SELL NOW";
       const rr = Math.abs((sig.takeProfit2 - sig.entry) / (sig.entry - sig.stopLoss)).toFixed(2);
+      const reason = sig.aiSummary || (sig.reasons?.slice(0, 3).join("; ") ?? "—");
       const text =
-        `<b>${arrow} ${symbol} · ${tf}</b>\n` +
-        `Grade <b>${sig.grade}</b> · ${sig.probability}% probability\n` +
+        `<b>${action} · ${symbol} · ${tf}</b>\n` +
+        `Grade <b>${sig.grade}</b> · Confidence <b>${sig.probability}%</b>\n` +
         `Setup: ${sig.setup ?? "—"}\n\n` +
         `Entry: <code>${sig.entry.toFixed(meta.digits)}</code>\n` +
-        `Stop:  <code>${sig.stopLoss.toFixed(meta.digits)}</code>\n` +
+        `SL:    <code>${sig.stopLoss.toFixed(meta.digits)}</code>\n` +
         `TP1:   <code>${sig.takeProfit1.toFixed(meta.digits)}</code>\n` +
         `TP2:   <code>${sig.takeProfit2.toFixed(meta.digits)}</code>\n` +
-        `R:R ≈ 1:${rr}`;
+        `R:R ≈ 1:${rr}\n\n` +
+        `<b>Why:</b> ${reason}`;
       chatIds.forEach((chatId) => {
         sendTg({ data: { chatId, text } }).catch(() => {});
       });

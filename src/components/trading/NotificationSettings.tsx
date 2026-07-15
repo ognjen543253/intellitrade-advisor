@@ -6,6 +6,7 @@ import {
   type NotifyEvent, type NotifySettings,
 } from "@/lib/trading/notification-settings";
 import { sendTelegramMessage, setTelegramWebhook } from "@/lib/trading/telegram.functions";
+import { loadChatIds } from "@/components/trading/TelegramAlerts";
 import { cn } from "@/lib/utils";
 
 export function NotificationSettings() {
@@ -29,8 +30,8 @@ export function NotificationSettings() {
     const chatIds = loadChatIds();
     if (chatIds.length === 0) { setStatus("Add a Chat ID in Telegram Alerts first."); setBusy(false); return; }
     const text = `🔔 <b>IntelliTrade Test</b>\n\nNotifications are connected and working.\n────────────`;
-    const results = await Promise.all(chatIds.map((id) => send({ data: { chatId: id, text } })));
-    const failed = results.filter((r: any) => !r.ok);
+    const results = await Promise.all(chatIds.map((id: string) => send({ data: { chatId: id, text } })));
+    const failed = results.filter((r) => !r.ok);
     setStatus(failed.length === 0 ? `Sent to ${chatIds.length} chat(s).` : `Failed: ${failed.map((f: any) => f.error).join(", ")}`);
     setBusy(false);
   };

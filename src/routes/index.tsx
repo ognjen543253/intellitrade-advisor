@@ -9,7 +9,13 @@ import { LearningPanel } from "@/components/trading/LearningPanel";
 import { TradeLog } from "@/components/trading/TradeLog";
 import { DiagnosticsPanel } from "@/components/trading/DiagnosticsPanel";
 import { TelegramAlerts, loadChatIds } from "@/components/trading/TelegramAlerts";
+import { NotificationSettings } from "@/components/trading/NotificationSettings";
 import { sendTelegramMessage } from "@/lib/trading/telegram.functions";
+import { shouldSend, getSettings } from "@/lib/trading/notification-settings";
+import {
+  formatSignalMessage, formatTradeOpened, formatTradeClosed,
+  formatDailyTarget, formatDailyLoss,
+} from "@/lib/trading/telegram-format";
 import { recordSignal } from "@/lib/trading/diagnostics-store";
 import {
   SYMBOLS, TIMEFRAMES,

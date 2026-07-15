@@ -43,7 +43,7 @@ export const Route = createFileRoute("/")({
   component: TradingDashboard,
 });
 
-function TradingDashboard() {
+export function TradingDashboard() {
   const [symbol, setSymbol] = useState<Symbol>("NAS100");
   const [timeframe, setTimeframe] = useState<Timeframe>("15m");
   const [accountBalance] = useState(10000);

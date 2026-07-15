@@ -5,8 +5,7 @@ import {
   EVENT_LABELS, getSettings, saveSettings, subscribeSettings,
   type NotifyEvent, type NotifySettings,
 } from "@/lib/trading/notification-settings";
-import { sendTelegramMessage } from "@/lib/trading/telegram.functions";
-import { loadChatIds } from "@/components/trading/TelegramAlerts";
+import { sendTelegramMessage, setTelegramWebhook } from "@/lib/trading/telegram.functions";
 import { cn } from "@/lib/utils";
 
 export function NotificationSettings() {

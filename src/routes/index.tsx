@@ -208,6 +208,73 @@ function TradingDashboard() {
     return () => window.clearTimeout(id);
   }, [ready, candles, symbol, timeframe, scan]);
 
+  // ── Telegram alerts hooks — declared before any early return to keep hook order stable ──
+  const sendTg = useServerFn(sendTelegramMessage);
+  const alertedRef = useRef<Set<string>>(new Set());
+  const knownTradesRef = useRef<Map<string, Trade["status"]>>(new Map());
+  const dailyFiredRef = useRef<{ target: boolean; loss: boolean; day: string }>({ target: false, loss: false, day: "" });
+
+  useEffect(() => {
+    if (!ready || !alertsOn || !shouldSend("signal")) return;
+    const chatIds = loadChatIds();
+    if (chatIds.length === 0) return;
+    const push = (text: string) =>
+      chatIds.forEach((chatId) => { sendTg({ data: { chatId, text } }).catch(() => {}); });
+    const currentSig = generateSignal(candles, symbol, timeframe);
+    const candidates: { tf: Timeframe; sig: Signal }[] = [];
+    if (currentSig.side !== "NONE") candidates.push({ tf: timeframe, sig: currentSig });
+    for (const row of scan) if (row.signal && row.signal.side !== "NONE") candidates.push({ tf: row.timeframe, sig: row.signal });
+    for (const { tf, sig } of candidates) {
+      const key = `${symbol}:${tf}:${sig.side}:${sig.grade}:${sig.entry.toFixed(meta.digits)}`;
+      if (alertedRef.current.has(key)) continue;
+      alertedRef.current.add(key);
+      push(formatSignalMessage(sig));
+    }
+    if (alertedRef.current.size > 200) alertedRef.current = new Set(Array.from(alertedRef.current).slice(-100));
+  }, [ready, alertsOn, symbol, timeframe, candles, scan, meta.digits, sendTg]);
+
+  useEffect(() => {
+    if (!alertsOn) return;
+    const chatIds = loadChatIds();
+    if (chatIds.length === 0) { for (const t of trades) knownTradesRef.current.set(t.id, t.status); return; }
+    const push = (text: string) =>
+      chatIds.forEach((chatId) => { sendTg({ data: { chatId, text } }).catch(() => {}); });
+    const seen = knownTradesRef.current;
+    for (const t of trades) {
+      const prev = seen.get(t.id);
+      if (prev === t.status) continue;
+      if (prev === undefined && t.status === "open") {
+        if (shouldSend("tradeOpen")) push(formatTradeOpened(t));
+      } else if (prev === "open" && t.status !== "open") {
+        const evGate = t.status === "win" ? "tpHit" : t.status === "loss" ? "slHit" : "tradeClose";
+        if (shouldSend(evGate) || shouldSend("tradeClose")) push(formatTradeClosed(t));
+      }
+      seen.set(t.id, t.status);
+    }
+  }, [alertsOn, trades, sendTg]);
+
+  useEffect(() => {
+    if (!alertsOn) return;
+    const chatIds = loadChatIds();
+    if (chatIds.length === 0) return;
+    const now = new Date();
+    const day = `${now.getFullYear()}-${now.getMonth()}-${now.getDate()}`;
+    if (dailyFiredRef.current.day !== day) dailyFiredRef.current = { target: false, loss: false, day };
+    const todayPnl = trades
+      .filter((t) => t.status !== "open" && t.closedAt && new Date(t.closedAt).toDateString() === now.toDateString())
+      .reduce((s, t) => s + t.pnl, 0);
+    const cfg = getSettings();
+    const push = (text: string) =>
+      chatIds.forEach((chatId) => { sendTg({ data: { chatId, text } }).catch(() => {}); });
+    if (!dailyFiredRef.current.target && cfg.dailyTarget > 0 && todayPnl >= cfg.dailyTarget && shouldSend("dailyTarget")) {
+      dailyFiredRef.current.target = true; push(formatDailyTarget(todayPnl));
+    }
+    if (!dailyFiredRef.current.loss && cfg.dailyLossLimit > 0 && todayPnl <= -Math.abs(cfg.dailyLossLimit) && shouldSend("dailyLoss")) {
+      dailyFiredRef.current.loss = true; push(formatDailyLoss(todayPnl));
+    }
+  }, [alertsOn, trades, sendTg]);
+
+
   if (!ready) {
     return (
       <div className="min-h-screen bg-background text-foreground">

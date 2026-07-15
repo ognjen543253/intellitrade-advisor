@@ -9,7 +9,13 @@ import { LearningPanel } from "@/components/trading/LearningPanel";
 import { TradeLog } from "@/components/trading/TradeLog";
 import { DiagnosticsPanel } from "@/components/trading/DiagnosticsPanel";
 import { TelegramAlerts, loadChatIds } from "@/components/trading/TelegramAlerts";
+import { NotificationSettings } from "@/components/trading/NotificationSettings";
 import { sendTelegramMessage } from "@/lib/trading/telegram.functions";
+import { shouldSend, getSettings } from "@/lib/trading/notification-settings";
+import {
+  formatSignalMessage, formatTradeOpened, formatTradeClosed,
+  formatDailyTarget, formatDailyLoss,
+} from "@/lib/trading/telegram-format";
 import { recordSignal } from "@/lib/trading/diagnostics-store";
 import {
   SYMBOLS, TIMEFRAMES,
@@ -237,45 +243,73 @@ function TradingDashboard() {
     logTradeFromSignal(sig, sizing.riskAmount || 100);
   };
 
-  // ── Telegram alerts: fire once per unique qualifying signal across all TFs ──
+  // ── Telegram alerts: signals + trade lifecycle + daily P&L gates ──
   const sendTg = useServerFn(sendTelegramMessage);
   const alertedRef = useRef<Set<string>>(new Set());
-  useEffect(() => {
-    if (!alertsOn) return;
+  const knownTradesRef = useRef<Map<string, Trade["status"]>>(new Map());
+  const dailyFiredRef = useRef<{ target: boolean; loss: boolean; day: string }>({ target: false, loss: false, day: "" });
+
+  const pushAll = (text: string) => {
     const chatIds = loadChatIds();
     if (chatIds.length === 0) return;
+    chatIds.forEach((chatId) => { sendTg({ data: { chatId, text } }).catch(() => {}); });
+  };
+
+  // Signal alerts
+  useEffect(() => {
+    if (!alertsOn || !shouldSend("signal")) return;
+    if (loadChatIds().length === 0) return;
 
     const candidates: { tf: Timeframe; sig: Signal }[] = [];
-    // include active signal + every scanned TF
     if (signal.side !== "NONE") candidates.push({ tf: timeframe, sig: signal });
-    for (const row of scan) {
-      if (row.signal && row.signal.side !== "NONE") candidates.push({ tf: row.timeframe, sig: row.signal });
-    }
+    for (const row of scan) if (row.signal && row.signal.side !== "NONE") candidates.push({ tf: row.timeframe, sig: row.signal });
 
     for (const { tf, sig } of candidates) {
       const key = `${symbol}:${tf}:${sig.side}:${sig.grade}:${sig.entry.toFixed(meta.digits)}`;
       if (alertedRef.current.has(key)) continue;
       alertedRef.current.add(key);
-      const action = sig.side === "BUY" ? "🟢 BUY NOW" : "🔴 SELL NOW";
-      const rr = Math.abs((sig.takeProfit2 - sig.entry) / (sig.entry - sig.stopLoss)).toFixed(2);
-      const reason = sig.aiSummary || (sig.reasons?.slice(0, 3).join("; ") ?? "—");
-      const text =
-        `<b>${action} · ${symbol} · ${tf}</b>\n` +
-        `Grade <b>${sig.grade}</b> · Confidence <b>${sig.probability}%</b>\n` +
-        `Setup: ${sig.setup ?? "—"}\n\n` +
-        `Entry: <code>${sig.entry.toFixed(meta.digits)}</code>\n` +
-        `SL:    <code>${sig.stopLoss.toFixed(meta.digits)}</code>\n` +
-        `TP1:   <code>${sig.takeProfit1.toFixed(meta.digits)}</code>\n` +
-        `TP2:   <code>${sig.takeProfit2.toFixed(meta.digits)}</code>\n` +
-        `R:R ≈ 1:${rr}\n\n` +
-        `<b>Why:</b> ${reason}`;
-      chatIds.forEach((chatId) => {
-        sendTg({ data: { chatId, text } }).catch(() => {});
-      });
+      pushAll(formatSignalMessage(sig));
     }
-    // cap memory
     if (alertedRef.current.size > 200) alertedRef.current = new Set(Array.from(alertedRef.current).slice(-100));
-  }, [alertsOn, symbol, timeframe, signal, scan, sendTg, meta.digits]);
+  }, [alertsOn, symbol, timeframe, signal, scan, meta.digits]);
+
+  // Trade lifecycle alerts (open, close/TP/SL)
+  useEffect(() => {
+    if (!alertsOn) return;
+    const seen = knownTradesRef.current;
+    for (const t of trades) {
+      const prev = seen.get(t.id);
+      if (prev === t.status) continue;
+      if (prev === undefined && t.status === "open") {
+        if (shouldSend("tradeOpen")) pushAll(formatTradeOpened(t));
+      } else if (prev === "open" && t.status !== "open") {
+        const evGate = t.status === "win" ? "tpHit" : t.status === "loss" ? "slHit" : "tradeClose";
+        if (shouldSend(evGate as any) || shouldSend("tradeClose")) pushAll(formatTradeClosed(t));
+      }
+      seen.set(t.id, t.status);
+    }
+  }, [alertsOn, trades]);
+
+  // Daily target / loss limit
+  useEffect(() => {
+    if (!alertsOn) return;
+    const now = new Date();
+    const day = `${now.getFullYear()}-${now.getMonth()}-${now.getDate()}`;
+    if (dailyFiredRef.current.day !== day) dailyFiredRef.current = { target: false, loss: false, day };
+    const todayPnl = trades
+      .filter((t) => t.status !== "open" && t.closedAt && new Date(t.closedAt).toDateString() === now.toDateString())
+      .reduce((s, t) => s + t.pnl, 0);
+    const cfg = getSettings();
+    if (!dailyFiredRef.current.target && cfg.dailyTarget > 0 && todayPnl >= cfg.dailyTarget && shouldSend("dailyTarget")) {
+      dailyFiredRef.current.target = true;
+      pushAll(formatDailyTarget(todayPnl));
+    }
+    if (!dailyFiredRef.current.loss && cfg.dailyLossLimit > 0 && todayPnl <= -Math.abs(cfg.dailyLossLimit) && shouldSend("dailyLoss")) {
+      dailyFiredRef.current.loss = true;
+      pushAll(formatDailyLoss(todayPnl));
+    }
+  }, [alertsOn, trades]);
+
 
 
 
@@ -430,6 +464,8 @@ function TradingDashboard() {
 
 
             <TelegramAlerts />
+            <NotificationSettings />
+
 
 
             <div className="rounded-xl border border-border/60 bg-surface p-4">

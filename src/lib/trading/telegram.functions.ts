@@ -57,3 +57,23 @@ export const listRecentChats = createServerFn({ method: "GET" }).handler(async (
 });
 
 export const BOT_USERNAME = "myapp_notify_sms_bot";
+
+/** Register a Telegram webhook so /commands reach our API route. */
+export const setTelegramWebhook = createServerFn({ method: "POST" })
+  .inputValidator((d: { url: string; secret?: string }) => d)
+  .handler(async ({ data }) => {
+    const body: Record<string, unknown> = {
+      url: data.url,
+      allowed_updates: ["message", "edited_message"],
+    };
+    if (data.secret) body.secret_token = data.secret;
+    const res = await fetch(api("setWebhook"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const j = await res.json().catch(() => ({}));
+    if (!res.ok || j?.ok === false) return { ok: false as const, error: j?.description ?? `HTTP ${res.status}` };
+    return { ok: true as const };
+  });
+

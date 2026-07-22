@@ -746,6 +746,7 @@ export function generateSignal(
   let rejectionReason = "";
   if (side === "NONE") {
     if (!spreadPass) rejectionReason = `Spread ${spreadPct.toFixed(1)}% of stop — trading cost too high.`;
+    else if (!sessionPass) rejectionReason = `${analysis.sessionTag} session — bot only trades during London, London-NY Overlap, and New York.`;
     else if (!majorityPass) {
       rejectionReason = `Weighted evidence is not strong enough yet: ${alignmentPct.toFixed(0)}% supports ${dominant} with ${evidenceCoverage.toFixed(0)}% active coverage. Need 60% confluence and ${minEvidenceCoveragePct}% coverage.`;
     }

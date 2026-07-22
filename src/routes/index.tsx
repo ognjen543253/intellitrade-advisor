@@ -44,8 +44,9 @@ export const Route = createFileRoute("/")({
 });
 
 export function TradingDashboard() {
-  const [symbol, setSymbol] = useState<Symbol>("NAS100");
-  const [timeframe, setTimeframe] = useState<Timeframe>("15m");
+  const [symbol, setSymbol] = useState<Symbol>("EURUSD");
+  const [timeframe, setTimeframe] = useState<Timeframe>("5m");
+
   const [accountBalance] = useState(10000);
   const [riskPct, setRiskPct] = useState<1 | 2>(1);
   const [alertsOn, setAlertsOn] = useState(true);

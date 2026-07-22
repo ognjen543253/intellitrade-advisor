@@ -50,7 +50,7 @@ export interface LiveCandle {
 
 type LiveFeedResult = { candles: LiveCandle[]; source: string; error?: string };
 
-const SCAN_TIMEFRAMES = ["1m", "5m", "15m", "1h", "4h"] as const;
+const SCAN_TIMEFRAMES = ["5m", "15m"] as const;
 
 export const fetchLiveCandles = createServerFn({ method: "GET" })
   .validator((data: { symbol: string; timeframe: string }) => data)

@@ -719,6 +719,14 @@ export function generateSignal(
       progress: clamp(qualityScore / (th.qualityFloor * 100), 0, 1),
       detail: `Quality ${qualityScore.toFixed(0)}% (floor ${(th.qualityFloor * 100).toFixed(0)}% — modifier only).`,
     },
+    {
+      key: "session", label: "Session (London / Overlap / New York)",
+      pass: sessionPass, actual: analysis.sessionTag as unknown as number, required: 1,
+      progress: sessionPass ? 1 : 0,
+      detail: sessionPass
+        ? `${analysis.sessionTag} session — trading allowed.`
+        : `${analysis.sessionTag} session — bot only trades London, Overlap, or New York.`,
+    },
   ];
 
   const failed = filters.filter((f) => !f.pass);

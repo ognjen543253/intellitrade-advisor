@@ -24,23 +24,13 @@ export interface Candle {
 
 export const SYMBOLS: { id: Symbol; label: string; group: string; basePrice: number; vol: number; digits: number }[] = [
   { id: "EURUSD", label: "EUR/USD", group: "Forex", basePrice: 1.0850, vol: 0.0006, digits: 5 },
-  { id: "GBPUSD", label: "GBP/USD", group: "Forex", basePrice: 1.2720, vol: 0.0008, digits: 5 },
-  { id: "USDJPY", label: "USD/JPY", group: "Forex", basePrice: 156.40, vol: 0.12, digits: 3 },
-  { id: "AUDUSD", label: "AUD/USD", group: "Forex", basePrice: 0.6620, vol: 0.0005, digits: 5 },
-  { id: "USDCAD", label: "USD/CAD", group: "Forex", basePrice: 1.3640, vol: 0.0006, digits: 5 },
-  { id: "USDCHF", label: "USD/CHF", group: "Forex", basePrice: 0.8810, vol: 0.0005, digits: 5 },
-  { id: "NZDUSD", label: "NZD/USD", group: "Forex", basePrice: 0.6080, vol: 0.0005, digits: 5 },
-  { id: "SPX500", label: "SPX500", group: "Index", basePrice: 5870, vol: 4.5, digits: 2 },
-  { id: "NAS100", label: "NAS100", group: "Index", basePrice: 21450, vol: 18, digits: 2 },
 ];
 
 export const TIMEFRAMES: { id: Timeframe; label: string; seconds: number }[] = [
-  { id: "1m", label: "1m", seconds: 60 },
   { id: "5m", label: "5m", seconds: 300 },
   { id: "15m", label: "15m", seconds: 900 },
-  { id: "1h", label: "1H", seconds: 3600 },
-  { id: "4h", label: "4H", seconds: 14400 },
 ];
+
 
 // Mulberry32 PRNG for reproducible candles per (symbol, tf)
 function mulberry32(seed: number) {

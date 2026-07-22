@@ -667,6 +667,12 @@ export function generateSignal(
   const spreadPass = slDist > 0 ? spreadPct <= th.maxSpreadOverSlPct : true;
   if (side !== "NONE" && !spreadPass) side = "NONE";
 
+  // Session gate: only trade during London / London-NY overlap / New York.
+  const sessionPass = analysis.sessionTag === "London"
+    || analysis.sessionTag === "Overlap"
+    || analysis.sessionTag === "New York";
+  if (side !== "NONE" && !sessionPass) side = "NONE";
+
   // ---- Diagnostics -------------------------------------------------------
   const filters: FilterCheck[] = [
     {
@@ -713,6 +719,14 @@ export function generateSignal(
       progress: clamp(qualityScore / (th.qualityFloor * 100), 0, 1),
       detail: `Quality ${qualityScore.toFixed(0)}% (floor ${(th.qualityFloor * 100).toFixed(0)}% — modifier only).`,
     },
+    {
+      key: "session", label: "Session (London / Overlap / New York)",
+      pass: sessionPass, actual: analysis.sessionTag as unknown as number, required: 1,
+      progress: sessionPass ? 1 : 0,
+      detail: sessionPass
+        ? `${analysis.sessionTag} session — trading allowed.`
+        : `${analysis.sessionTag} session — bot only trades London, Overlap, or New York.`,
+    },
   ];
 
   const failed = filters.filter((f) => !f.pass);
@@ -732,6 +746,7 @@ export function generateSignal(
   let rejectionReason = "";
   if (side === "NONE") {
     if (!spreadPass) rejectionReason = `Spread ${spreadPct.toFixed(1)}% of stop — trading cost too high.`;
+    else if (!sessionPass) rejectionReason = `${analysis.sessionTag} session — bot only trades during London, London-NY Overlap, and New York.`;
     else if (!majorityPass) {
       rejectionReason = `Weighted evidence is not strong enough yet: ${alignmentPct.toFixed(0)}% supports ${dominant} with ${evidenceCoverage.toFixed(0)}% active coverage. Need 60% confluence and ${minEvidenceCoveragePct}% coverage.`;
     }

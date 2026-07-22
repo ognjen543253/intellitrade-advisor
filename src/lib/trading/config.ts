@@ -145,19 +145,21 @@ export const CONFIG: QuantConfig = {
     htfAlignment: 8,
   },
   thresholds: {
-    gradeAPlus: 78,
-    gradeA: 70,
-    gradeB: 62,
-    gradeC: 55,
-    qualityFloor: 0.6,
+    // Only best trades — Grade A or A+ qualify. Anything below A = No Trade.
+    gradeAPlus: 82,
+    gradeA: 74,
+    gradeB: 74,
+    gradeC: 74,
+    qualityFloor: 0.7,
     slAtrMult: 1.5,
     tp1RMult: 2,
     tp2RMult: 3.2,
     maxSpreadOverSlPct: 30,
-    adxTrendMin: 18,
+    adxTrendMin: 20,
     squeezeBandwidthPct: 0.2,
     structureLookback: 20,
   },
+
   sessions: {
     Asia: 0.8,
     London: 0.95,

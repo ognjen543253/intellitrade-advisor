@@ -667,6 +667,12 @@ export function generateSignal(
   const spreadPass = slDist > 0 ? spreadPct <= th.maxSpreadOverSlPct : true;
   if (side !== "NONE" && !spreadPass) side = "NONE";
 
+  // Session gate: only trade during London / London-NY overlap / New York.
+  const sessionPass = analysis.sessionTag === "London"
+    || analysis.sessionTag === "Overlap"
+    || analysis.sessionTag === "New York";
+  if (side !== "NONE" && !sessionPass) side = "NONE";
+
   // ---- Diagnostics -------------------------------------------------------
   const filters: FilterCheck[] = [
     {

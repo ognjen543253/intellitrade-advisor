@@ -148,12 +148,18 @@ export const CONFIG: QuantConfig = {
     htfAlignment: 8,
   },
   thresholds: {
-    // Only best trades — Grade A or A+ qualify. Anything below A = No Trade.
-    gradeAPlus: 82,
-    gradeA: 74,
-    gradeB: 74,
-    gradeC: 74,
-    qualityFloor: 0.7,
+    // Tiered grading — each tier requires both a probability AND a quality floor.
+    // Anything below gradeB probability defaults to C. The signal engine still
+    // requires majority confluence + named setup + session + spread gates for
+    // side to be BUY/SELL; the tiers below are what the UI/alerts filter on.
+    gradeAPlus: 80,
+    gradeA: 72,
+    gradeB: 65,
+    gradeC: 1,
+    gradeAPlusQuality: 0.8,
+    gradeAQuality: 0.7,
+    gradeBQuality: 0.6,
+    qualityFloor: 0.6,
     slAtrMult: 1.5,
     tp1RMult: 2,
     tp2RMult: 3.2,

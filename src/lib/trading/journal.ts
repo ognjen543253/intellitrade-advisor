@@ -186,3 +186,54 @@ export function learningInsights(trades: Trade[]) {
 
   return { bySymbol, byConfidenceBucket, bySide, bestSymbol, worstSymbol };
 }
+
+/** Peak-to-trough drawdown on the closed-trade equity curve (dollars). */
+export function maxDrawdown(trades: Trade[]): number {
+  const closed = trades
+    .filter(t => t.status !== "open")
+    .sort((a, b) => (a.closedAt ?? a.openedAt) - (b.closedAt ?? b.openedAt));
+  let equity = 0, peak = 0, worst = 0;
+  for (const t of closed) {
+    equity += t.pnl;
+    if (equity > peak) peak = equity;
+    const dd = peak - equity;
+    if (dd > worst) worst = dd;
+  }
+  return +worst.toFixed(2);
+}
+
+export interface GradeStat {
+  grade: Grade;
+  total: number;
+  wins: number;
+  losses: number;
+  winRate: number;
+  profitFactor: number;
+  avgR: number;
+  totalPnl: number;
+  maxDrawdown: number;
+}
+
+export function statsByGrade(trades: Trade[]): GradeStat[] {
+  const grades: Grade[] = ["A+", "A", "B", "C"];
+  return grades.map((g) => {
+    const bucket = trades.filter(t => (t.grade ?? "C") === g && t.status !== "open");
+    const wins = bucket.filter(t => t.status === "win");
+    const losses = bucket.filter(t => t.status === "loss");
+    const grossWin = wins.reduce((s, t) => s + t.pnl, 0);
+    const grossLoss = Math.abs(losses.reduce((s, t) => s + t.pnl, 0));
+    const totalPnl = bucket.reduce((s, t) => s + t.pnl, 0);
+    const rSum = bucket.reduce((s, t) => s + t.rMultiple, 0);
+    return {
+      grade: g,
+      total: bucket.length,
+      wins: wins.length,
+      losses: losses.length,
+      winRate: bucket.length ? Math.round((wins.length / bucket.length) * 100) : 0,
+      profitFactor: grossLoss ? +(grossWin / grossLoss).toFixed(2) : grossWin > 0 ? 99 : 0,
+      avgR: bucket.length ? +(rSum / bucket.length).toFixed(2) : 0,
+      totalPnl: +totalPnl.toFixed(2),
+      maxDrawdown: maxDrawdown(bucket),
+    };
+  });
+}

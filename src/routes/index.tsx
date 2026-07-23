@@ -474,6 +474,7 @@ export function TradingDashboard() {
             </div>
 
 
+            <QualitySettings />
             <TelegramAlerts />
             <NotificationSettings />
 

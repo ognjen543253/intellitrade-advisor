@@ -229,6 +229,7 @@ export function TradingDashboard() {
     if (currentSig.side !== "NONE") candidates.push({ tf: timeframe, sig: currentSig });
     for (const row of scan) if (row.signal && row.signal.side !== "NONE") candidates.push({ tf: row.timeframe, sig: row.signal });
     for (const { tf, sig } of candidates) {
+      if (!isTradeableGrade(sig.grade)) continue;
       const key = `${symbol}:${tf}:${sig.side}:${sig.grade}:${sig.entry.toFixed(meta.digits)}`;
       if (alertedRef.current.has(key)) continue;
       alertedRef.current.add(key);

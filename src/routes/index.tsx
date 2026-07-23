@@ -10,8 +10,11 @@ import { TradeLog } from "@/components/trading/TradeLog";
 import { DiagnosticsPanel } from "@/components/trading/DiagnosticsPanel";
 import { TelegramAlerts, loadChatIds } from "@/components/trading/TelegramAlerts";
 import { NotificationSettings } from "@/components/trading/NotificationSettings";
+import { QualitySettings } from "@/components/trading/QualitySettings";
+import { GradeStats } from "@/components/trading/GradeStats";
 import { sendTelegramMessage } from "@/lib/trading/telegram.functions";
 import { shouldSend, getSettings } from "@/lib/trading/notification-settings";
+import { isTradeableGrade } from "@/lib/trading/quality-settings";
 import {
   formatSignalMessage, formatTradeOpened, formatTradeClosed,
   formatDailyTarget, formatDailyLoss,
@@ -226,6 +229,7 @@ export function TradingDashboard() {
     if (currentSig.side !== "NONE") candidates.push({ tf: timeframe, sig: currentSig });
     for (const row of scan) if (row.signal && row.signal.side !== "NONE") candidates.push({ tf: row.timeframe, sig: row.signal });
     for (const { tf, sig } of candidates) {
+      if (!isTradeableGrade(sig.grade)) continue;
       const key = `${symbol}:${tf}:${sig.side}:${sig.grade}:${sig.entry.toFixed(meta.digits)}`;
       if (alertedRef.current.has(key)) continue;
       alertedRef.current.add(key);
@@ -307,6 +311,7 @@ export function TradingDashboard() {
 
   const handleLogTrade = (sig: Signal) => {
     if (sig.side === "NONE") return;
+    if (!isTradeableGrade(sig.grade)) return; // respect Trading Quality setting
     if (activeTrade) return; // one open trade per symbol/timeframe — entry can't move
     logTradeFromSignal(sig, sizing.riskAmount || 100);
   };
@@ -414,6 +419,11 @@ export function TradingDashboard() {
               </div>
             </section>
 
+            {/* Performance broken down by signal grade */}
+            <section>
+              <GradeStats trades={trades} />
+            </section>
+
             {/* Trading calendar */}
             <section>
               <SectionHeader icon={<CalendarDays className="h-4 w-4" />} title="Trading Calendar" sub="All logged trades — green = profitable day, red = losing day" />
@@ -464,6 +474,7 @@ export function TradingDashboard() {
             </div>
 
 
+            <QualitySettings />
             <TelegramAlerts />
             <NotificationSettings />
 

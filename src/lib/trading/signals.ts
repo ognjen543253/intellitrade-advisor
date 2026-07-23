@@ -640,7 +640,7 @@ export function generateSignal(
   const bullProbability = sideProbability(bullScore, bearScore, bullRaw, bearRaw, setupInfo.bias === "bull");
   const bearProbability = sideProbability(bearScore, bullScore, bearRaw, bullRaw, setupInfo.bias === "bear");
 
-  const grade = gradeFor(probability);
+  const grade = gradeFor(probability, qualityScore);
   const edge = Math.abs(bullScore - bearScore);
   const confidence = probability; // legacy alias
 

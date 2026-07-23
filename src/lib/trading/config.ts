@@ -218,11 +218,17 @@ export const QUALITY_SIGNALS: ReadonlySet<SignalKey> = new Set([
   "sessionStrength",
 ]);
 
-export function gradeFor(probability: number): Grade {
+export function gradeFor(probability: number, qualityScore = 100): Grade {
   const t = CONFIG.thresholds;
-  if (probability >= t.gradeAPlus) return "A+";
-  if (probability >= t.gradeA) return "A";
-  if (probability >= t.gradeB) return "B";
+  const q = qualityScore; // 0..100
+  if (probability >= t.gradeAPlus && q >= t.gradeAPlusQuality * 100) return "A+";
+  if (probability >= t.gradeA && q >= t.gradeAQuality * 100) return "A";
+  if (probability >= t.gradeB && q >= t.gradeBQuality * 100) return "B";
   if (probability >= t.gradeC) return "C";
   return "None";
+}
+
+export const GRADE_ORDER: Grade[] = ["None", "C", "B", "A", "A+"];
+export function gradeAtLeast(g: Grade, min: Grade): boolean {
+  return GRADE_ORDER.indexOf(g) >= GRADE_ORDER.indexOf(min);
 }

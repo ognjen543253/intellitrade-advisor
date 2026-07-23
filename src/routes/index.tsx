@@ -10,8 +10,11 @@ import { TradeLog } from "@/components/trading/TradeLog";
 import { DiagnosticsPanel } from "@/components/trading/DiagnosticsPanel";
 import { TelegramAlerts, loadChatIds } from "@/components/trading/TelegramAlerts";
 import { NotificationSettings } from "@/components/trading/NotificationSettings";
+import { QualitySettings } from "@/components/trading/QualitySettings";
+import { GradeStats } from "@/components/trading/GradeStats";
 import { sendTelegramMessage } from "@/lib/trading/telegram.functions";
 import { shouldSend, getSettings } from "@/lib/trading/notification-settings";
+import { isTradeableGrade } from "@/lib/trading/quality-settings";
 import {
   formatSignalMessage, formatTradeOpened, formatTradeClosed,
   formatDailyTarget, formatDailyLoss,

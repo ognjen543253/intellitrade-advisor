@@ -311,6 +311,7 @@ export function TradingDashboard() {
 
   const handleLogTrade = (sig: Signal) => {
     if (sig.side === "NONE") return;
+    if (!isTradeableGrade(sig.grade)) return; // respect Trading Quality setting
     if (activeTrade) return; // one open trade per symbol/timeframe — entry can't move
     logTradeFromSignal(sig, sizing.riskAmount || 100);
   };

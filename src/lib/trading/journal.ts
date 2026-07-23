@@ -64,6 +64,7 @@ export function logTradeFromSignal(sig: Signal, riskAmount = 100): Trade {
     takeProfit1: sig.takeProfit1,
     takeProfit2: sig.takeProfit2,
     confidence: sig.confidence,
+    grade: sig.grade,
     reasons: sig.reasons,
     openedAt: Date.now(),
     status: "open",

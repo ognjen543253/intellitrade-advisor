@@ -1,7 +1,14 @@
 import { Signal } from "@/lib/trading/signals";
 import { Pill } from "./Stat";
 import { cn } from "@/lib/utils";
-import { ArrowDown, ArrowUp, Check, X, Clock, Plus } from "lucide-react";
+import { ArrowDown, ArrowUp, Check, X, Clock, Plus, Eye } from "lucide-react";
+import { useSyncExternalStore } from "react";
+import {
+  getQualityMode,
+  subscribeQuality,
+  isTradeableGrade,
+  currentQualityOption,
+} from "@/lib/trading/quality-settings";
 
 interface Props {
   signal: Signal;
@@ -13,6 +20,9 @@ const gradeTone = (g: Signal["grade"]) =>
   g === "A+" ? "bull" : g === "A" ? "bull" : g === "B" ? "info" : g === "C" ? "warning" : "muted";
 
 export function SignalCard({ signal, digits, onLogTrade }: Props) {
+  const mode = useSyncExternalStore(subscribeQuality, getQualityMode, getQualityMode);
+  const opt = currentQualityOption();
+  const tradeable = signal.side !== "NONE" && isTradeableGrade(signal.grade, mode);
   if (signal.side === "NONE") {
     return (
       <div className="rounded-xl border border-border/60 bg-surface p-5">

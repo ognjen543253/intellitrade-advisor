@@ -1,5 +1,6 @@
 import type { Signal } from "./signals";
 import type { Symbol, Timeframe } from "./market-data";
+import type { Grade } from "./config";
 
 
 
@@ -15,6 +16,7 @@ export interface Trade {
   takeProfit1: number;
   takeProfit2: number;
   confidence: number;
+  grade?: Grade;
   reasons: string[];
   openedAt: number; // ms
   closedAt?: number; // ms

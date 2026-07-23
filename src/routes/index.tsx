@@ -419,6 +419,11 @@ export function TradingDashboard() {
               </div>
             </section>
 
+            {/* Performance broken down by signal grade */}
+            <section>
+              <GradeStats trades={trades} />
+            </section>
+
             {/* Trading calendar */}
             <section>
               <SectionHeader icon={<CalendarDays className="h-4 w-4" />} title="Trading Calendar" sub="All logged trades — green = profitable day, red = losing day" />

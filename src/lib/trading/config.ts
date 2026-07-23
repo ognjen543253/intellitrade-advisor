@@ -66,13 +66,16 @@ export interface QuantConfig {
   };
   weights: Record<SignalKey, number>;
   thresholds: {
-    // Probability -> grade thresholds. Below `gradeC` = No Trade.
+    // Probability -> grade thresholds. Each tier also has a minimum quality
+    // score (0..1) — a great probability with poor quality drops one tier.
     gradeAPlus: number;
     gradeA: number;
     gradeB: number;
     gradeC: number;
-    // Quality scales probability. Floor is intentionally forgiving — a poor
-    // session shouldn't kill an otherwise excellent setup.
+    gradeAPlusQuality: number;
+    gradeAQuality: number;
+    gradeBQuality: number;
+    // Legacy scalar quality floor (used to soft-scale probability).
     qualityFloor: number;
     // Risk model.
     slAtrMult: number;

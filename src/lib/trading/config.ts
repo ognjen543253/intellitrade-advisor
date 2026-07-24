@@ -155,7 +155,7 @@ export const CONFIG: QuantConfig = {
     gradeAPlus: 80,
     gradeA: 72,
     gradeB: 65,
-    gradeC: 1,
+    gradeC: 65,
     gradeAPlusQuality: 0.8,
     gradeAQuality: 0.7,
     gradeBQuality: 0.6,

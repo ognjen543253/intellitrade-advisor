@@ -154,8 +154,8 @@ export const CONFIG: QuantConfig = {
     // side to be BUY/SELL; the tiers below are what the UI/alerts filter on.
     gradeAPlus: 80,
     gradeA: 72,
-    gradeB: 65,
-    gradeC: 65,
+    gradeB: 60,
+    gradeC: 60,
     gradeAPlusQuality: 0.8,
     gradeAQuality: 0.7,
     gradeBQuality: 0.6,
